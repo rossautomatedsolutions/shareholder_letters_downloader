@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Iterable, List, Dict
 from urllib.parse import urljoin
 
+from scripts.archive_scrapers import get_archive_scraper
+
 try:
     import pandas as pd
 except ModuleNotFoundError:  # pragma: no cover - handled at runtime
@@ -150,6 +152,11 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
         )
     rows: List[Dict[str, str]] = []
     for company in companies:
+        archive_scraper = get_archive_scraper(company.company_id)
+        if archive_scraper is not None:
+            print(f"Using structured archive scraper: {company.company_id}")
+            rows.extend(archive_scraper(company.company_id, company.company_name, 20))
+            continue
         rows.extend(fetch_candidates(company))
 
     deduped_rows = deduplicate_urls(rows)
