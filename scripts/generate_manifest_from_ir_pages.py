@@ -1,8 +1,22 @@
+import importlib
+import importlib.util
 import re
 import time
 from dataclasses import dataclass
 from typing import Iterable, List, Dict
 from urllib.parse import urljoin
+
+
+def load_archive_scraper_getter():
+    module_name = "archive_scrapers" if __package__ in (None, "") else "scripts.archive_scrapers"
+    if importlib.util.find_spec(module_name) is None:
+        return None
+
+    module = importlib.import_module(module_name)
+    return getattr(module, "get_archive_scraper", None)
+
+
+get_archive_scraper = load_archive_scraper_getter()
 
 try:
     import pandas as pd
