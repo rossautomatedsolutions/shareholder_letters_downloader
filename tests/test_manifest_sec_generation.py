@@ -7,6 +7,8 @@ from scripts.generate_manifest_from_sec import (
     discover_letter_documents_for_filing,
     generate_rows,
     has_target_phrase,
+    select_latest_filings,
+    Filing,
 )
 
 
@@ -15,6 +17,7 @@ class ManifestSecGenerationTests(unittest.TestCase):
         self.assertTrue(has_target_phrase("2024 Letter to Shareholders.pdf"))
         self.assertTrue(has_target_phrase("Chairman Letter - Annual Report"))
         self.assertTrue(has_target_phrase("CEO_Letter_2023.html"))
+        self.assertTrue(has_target_phrase("letterfromchairman2022.pdf"))
         self.assertFalse(has_target_phrase("proxy statement"))
 
     def test_detect_source_type_limits_manifest_sources_to_html_or_pdf(self):
@@ -22,6 +25,15 @@ class ManifestSecGenerationTests(unittest.TestCase):
         self.assertEqual(detect_source_type("chairman-letter.htm"), "HTML")
         self.assertEqual(detect_source_type("letter-to-shareholders.html"), "HTML")
         self.assertIsNone(detect_source_type("letter-to-shareholders.docx"))
+
+    def test_select_latest_filings_returns_most_recent_first(self):
+        filings = [
+            Filing("a", "2022-02-01", "2021-12-31", "10-K"),
+            Filing("b", "2024-02-01", "2023-12-31", "10-K"),
+            Filing("c", "2023-02-01", "2022-12-31", "10-K"),
+        ]
+        selected = select_latest_filings(filings, max_filings_per_company=2)
+        self.assertEqual([f.accession_number for f in selected], ["b", "c"])
 
     def test_discover_letter_documents_for_filing_filters_and_extracts_urls(self):
         mock_client = mock.Mock()
@@ -80,6 +92,7 @@ class ManifestSecGenerationTests(unittest.TestCase):
             mock_client,
             companies=[Company(ticker="AAPL", cik="0000320193", name="Apple Inc.")],
             years=10,
+            max_filings_per_company=1,
         )
 
         self.assertEqual(

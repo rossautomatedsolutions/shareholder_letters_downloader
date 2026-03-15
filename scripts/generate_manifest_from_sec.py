@@ -24,12 +24,18 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik}.json"
 FILING_INDEX_URL_TEMPLATE = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/index.json"
 ARCHIVES_BASE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{filename}"
-TARGET_PHRASES = (
-    "letter to shareholders",
-    "ceo letter",
-    "chairman letter",
-)
 USER_AGENT = "shareholder-letters-downloader/1.0 (contact: ops@example.com)"
+
+TARGET_PHRASE_ALIASES = (
+    "letter to shareholders",
+    "letter to stockholders",
+    "shareholder letter",
+    "stockholder letter",
+    "ceo letter",
+    "letter from ceo",
+    "chairman letter",
+    "letter from chairman",
+)
 
 
 @dataclass(frozen=True)
@@ -75,7 +81,13 @@ def normalize_company_id(ticker: str) -> str:
 
 
 def normalize_for_matching(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
+
+def normalize_for_path(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
 
@@ -122,6 +134,11 @@ def parse_recent_filings(submissions_json: Dict) -> List[Filing]:
 
 
 
+def filing_year_text(filing: Filing) -> str:
+    return filing.report_date or filing.filing_date
+
+
+
 def filter_10k_filings(filings: Iterable[Filing], years: int) -> List[Filing]:
     current_year = dt.date.today().year
     min_year = current_year - years + 1
@@ -129,7 +146,7 @@ def filter_10k_filings(filings: Iterable[Filing], years: int) -> List[Filing]:
     for filing in filings:
         if filing.form != "10-K":
             continue
-        year_text = filing.report_date or filing.filing_date
+        year_text = filing_year_text(filing)
         if not year_text:
             continue
         filing_year = int(year_text[:4])
@@ -137,6 +154,14 @@ def filter_10k_filings(filings: Iterable[Filing], years: int) -> List[Filing]:
             continue
         filtered.append(filing)
     return filtered
+
+
+
+def select_latest_filings(filings: Iterable[Filing], max_filings_per_company: int) -> List[Filing]:
+    sorted_filings = sorted(filings, key=filing_year_text, reverse=True)
+    if max_filings_per_company <= 0:
+        return sorted_filings
+    return sorted_filings[:max_filings_per_company]
 
 
 
@@ -156,8 +181,17 @@ def detect_source_type(filename: str) -> Optional[str]:
 
 
 def has_target_phrase(*values: str) -> bool:
-    haystack = " ".join(normalize_for_matching(value) for value in values if value)
-    return any(phrase in haystack for phrase in TARGET_PHRASES)
+    normalized_values = [normalize_for_matching(value) for value in values if value]
+    haystack = " ".join(normalized_values)
+    path_haystack = " ".join(normalize_for_path(value) for value in values if value)
+
+    for phrase in TARGET_PHRASE_ALIASES:
+        normalized_phrase = normalize_for_matching(phrase)
+        if normalized_phrase and normalized_phrase in haystack:
+            return True
+        if normalize_for_path(phrase) in path_haystack:
+            return True
+    return False
 
 
 
@@ -178,9 +212,8 @@ def discover_letter_documents_for_filing(client: SecClient, cik: str, accession_
         source_type = detect_source_type(filename)
         if source_type is None:
             continue
-        item_text = str(item.get("type", ""))
-        href_text = str(item.get("href", ""))
-        if not has_target_phrase(filename, item_text, href_text):
+
+        if not has_target_phrase(filename, str(item.get("type", "")), str(item.get("href", ""))):
             continue
 
         url = ARCHIVES_BASE_URL.format(cik=str(int(cik)), accession=accession_compact, filename=filename)
@@ -189,7 +222,12 @@ def discover_letter_documents_for_filing(client: SecClient, cik: str, accession_
 
 
 
-def generate_rows(client: SecClient, companies: Iterable[Company], years: int) -> List[Dict[str, str]]:
+def generate_rows(
+    client: SecClient,
+    companies: Iterable[Company],
+    years: int,
+    max_filings_per_company: int,
+) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     for company in companies:
         submissions_url = SUBMISSIONS_URL_TEMPLATE.format(cik=company.cik)
@@ -202,8 +240,10 @@ def generate_rows(client: SecClient, companies: Iterable[Company], years: int) -
 
         recent_filings = parse_recent_filings(submissions_json)
         ten_k_filings = filter_10k_filings(recent_filings, years=years)
-        for filing in ten_k_filings:
-            filing_year = (filing.report_date or filing.filing_date)[:4]
+        selected_filings = select_latest_filings(ten_k_filings, max_filings_per_company=max_filings_per_company)
+
+        for filing in selected_filings:
+            filing_year = filing_year_text(filing)[:4]
             documents = discover_letter_documents_for_filing(
                 client,
                 cik=company.cik,
@@ -240,7 +280,7 @@ def deduplicate_rows(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
 def write_manifest(rows: Iterable[Dict[str, str]], output_path: Path = OUTPUT_PATH) -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rows_list = list(rows)
-    rows_list.sort(key=lambda row: (row["company_id"], row["year"], row["url"]), reverse=False)
+    rows_list.sort(key=lambda row: (row["company_id"], row["year"], row["url"]))
 
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=MANIFEST_COLUMNS)
@@ -267,6 +307,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Look back this many report years for 10-K filings (default: 10).",
     )
+    parser.add_argument(
+        "--max-filings-per-company",
+        type=int,
+        default=1,
+        help="Limit to the latest N 10-K filings per company (default: 1, use 0 for no limit).",
+    )
     return parser.parse_args()
 
 
@@ -275,7 +321,12 @@ def main() -> None:
     args = parse_args()
     client = SecClient()
     companies = load_companies_by_ticker(client, requested_tickers=args.tickers)
-    rows = generate_rows(client, companies=companies, years=args.years)
+    rows = generate_rows(
+        client,
+        companies=companies,
+        years=args.years,
+        max_filings_per_company=args.max_filings_per_company,
+    )
     deduped_rows = deduplicate_rows(rows)
     row_count = write_manifest(deduped_rows, output_path=OUTPUT_PATH)
     print(f"Wrote {row_count} rows to {OUTPUT_PATH}")

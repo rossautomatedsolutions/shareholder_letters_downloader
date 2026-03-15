@@ -149,10 +149,13 @@ You can also generate a backup manifest from SEC EDGAR submissions by scanning r
 
 Both `HTML` and `PDF` links are supported so this can supplement the IR-page scraper output.
 
+By default, the SEC generator scans the latest `10-K` for each ticker (`--max-filings-per-company 1`).
+Increase this value (or set `0`) to scan more historical filings when needed.
+
 Example:
 
 ```bash
-python scripts/generate_manifest_from_sec.py --tickers AAPL MSFT AMZN JPM --years 10
+python scripts/generate_manifest_from_sec.py --tickers AAPL MSFT AMZN JPM --years 10 --max-filings-per-company 1
 ```
 
 This writes `manifests/letters_manifest.sec.csv` with rows in the standard manifest schema (`company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`).
