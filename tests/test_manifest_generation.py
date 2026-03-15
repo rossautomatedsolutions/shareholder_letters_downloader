@@ -166,6 +166,25 @@ class ManifestGenerationTests(unittest.TestCase):
             ["scripts.archive_scrapers", "archive_scrapers"],
         )
 
+
+    @unittest.skipIf(requests is None, "requests is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
+    def test_scrape_berkshire_letters_enforces_minimum_count(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            status_code=200,
+            text='''
+                <html>
+                    <body>
+                        <a href="/letters/2024ltr.pdf">2024</a>
+                    </body>
+                </html>
+            ''',
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        with self.assertRaises(RuntimeError):
+            scrape_berkshire_letters(minimum_expected_letters=40)
+
     @unittest.skipIf(requests is None, "requests is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
     def test_scrape_berkshire_letters_extracts_all_pdf_links(self, mock_get):
@@ -511,7 +530,7 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertIn("importlib.util.find_spec", source)
         self.assertIn("for module_name in module_names", source)
         self.assertIn('if company.company_id == "berkshire_hathaway"', source)
-        self.assertIn("company_rows = scrape_berkshire_letters()", source)
+        self.assertIn("company_rows = scrape_berkshire_letters(", source)
 
     @unittest.skipIf(pd is None, "pandas is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")

@@ -98,6 +98,7 @@ REQUEST_HEADERS = {
 REQUEST_TIMEOUT_SECONDS = 30
 RETRY_DELAYS_SECONDS = (1, 3, 5)
 RETRYABLE_STATUS_CODES = {403, 404, 429}
+MIN_BERKSHIRE_LETTERS = 40
 
 
 @dataclass(frozen=True)
@@ -232,7 +233,9 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
-def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
+def scrape_berkshire_letters(
+    timeout_seconds: int = 20, minimum_expected_letters: int = 0
+) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
             "requests and beautifulsoup4 are required to scrape Berkshire letters."
@@ -257,8 +260,8 @@ def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
         if absolute_url in seen_urls:
             continue
         seen_urls.add(absolute_url)
-        year_match = re.search(r"(19|20)\d{2}", absolute_url)
-        year = year_match.group(0) if year_match else ""
+        link_text = " ".join(link.get_text(" ", strip=True).split())
+        year = detect_year(absolute_url, link_text)
         rows.append(
             {
                 "company_id": "berkshire_hathaway",
@@ -270,7 +273,14 @@ def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
             }
         )
 
-    return sorted(rows, key=lambda row: (row["year"], row["url"]), reverse=True)
+    sorted_rows = sorted(rows, key=lambda row: (row["year"], row["url"]), reverse=True)
+    if minimum_expected_letters and len(sorted_rows) < minimum_expected_letters:
+        raise RuntimeError(
+            f"Berkshire scraper only found {len(sorted_rows)} PDF letters from {source_url}; "
+            f"expected at least {minimum_expected_letters}."
+        )
+
+    return sorted_rows
 
 
 def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict[str, str]], int]:
@@ -349,7 +359,7 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     for index, company in enumerate(companies_list):
         company_rows: List[Dict[str, str]] = []
         if company.company_id == "berkshire_hathaway":
-            company_rows = scrape_berkshire_letters()
+            company_rows = scrape_berkshire_letters(minimum_expected_letters=MIN_BERKSHIRE_LETTERS)
             if not company_rows:
                 print("Dedicated Berkshire scraper returned no candidates; falling back.")
 
