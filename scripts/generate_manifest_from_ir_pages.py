@@ -65,6 +65,7 @@ EXCLUDE_URL_KEYWORDS = (
 KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
     re.compile(r"/letters/[^/]*ltr\.pdf$"),
 )
+BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
@@ -112,7 +113,9 @@ def detect_year(url: str, link_text: str) -> str:
 def is_candidate_link(url: str, text: str) -> bool:
     lowered_url = url.lower()
     lowered_text = text.lower()
-    parsed_path = urlparse(url).path.lower()
+    parsed_url = urlparse(url)
+    parsed_path = parsed_url.path.lower()
+    parsed_host = parsed_url.netloc.lower()
 
     if ".pdf" not in parsed_path:
         return False
@@ -122,7 +125,9 @@ def is_candidate_link(url: str, text: str) -> bool:
     ):
         return False
 
-    if any(pattern.search(parsed_path) for pattern in KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS):
+    if parsed_host in BERKSHIRE_HOSTS and any(
+        pattern.search(parsed_path) for pattern in KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS
+    ):
         return True
 
     return any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS) or any(
