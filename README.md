@@ -132,6 +132,22 @@ python scripts/generate_manifest_from_ir_pages.py
 The script writes results to `manifests/letters_manifest.auto.csv` using the existing manifest schema.
 Review the generated rows, verify that each URL is a valid shareholder letter, and then copy valid rows into `manifests/letters_manifest.csv`.
 
+### Optional SEC EDGAR-based generator
+
+You can also generate a manifest from SEC EDGAR submissions by scanning recent `10-K` filings and matching PDF filenames that contain one of:
+
+- `letter`
+- `shareholder`
+- `chairman`
+
+Example:
+
+```bash
+python scripts/generate_manifest_from_sec.py --tickers AAPL MSFT AMZN JPM --years 10
+```
+
+This writes `manifests/letters_manifest.sec.csv` with rows in the standard manifest schema (`company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`).
+
 ## Testing
 
 Run:
