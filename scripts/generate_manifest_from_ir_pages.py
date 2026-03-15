@@ -155,7 +155,7 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
         archive_scraper = get_archive_scraper(company.company_id)
         if archive_scraper is not None:
             print(f"Using structured archive scraper: {company.company_id}")
-            rows.extend(archive_scraper(company.company_id, company.company_name, 20))
+            rows.extend(archive_scraper())
             continue
         rows.extend(fetch_candidates(company))
 

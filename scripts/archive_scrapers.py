@@ -14,12 +14,8 @@ except ModuleNotFoundError:  # pragma: no cover - handled at runtime
 
 YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 
-ARCHIVE_SOURCES: Dict[str, str] = {
-    "berkshire_hathaway": "https://www.berkshirehathaway.com/letters/letters.html",
-    "amazon": "https://ir.aboutamazon.com/annual-reports-proxies-and-shareholder-letters/default.aspx",
-    "jpmorgan_chase": "https://www.jpmorganchase.com/ir/annual-report",
-    "blackrock": "https://ir.blackrock.com/annual-reports-and-proxy",
-}
+MANIFEST_DOCUMENT_TYPE = "shareholder_letter"
+MANIFEST_SOURCE_TYPE = "PDF"
 
 
 def _detect_year(url: str, link_text: str) -> str:
@@ -70,9 +66,9 @@ def _extract_pdf_rows(
             {
                 "company_id": company_id,
                 "company_name": company_name,
-                "document_type": "shareholder_letter",
+                "document_type": MANIFEST_DOCUMENT_TYPE,
                 "year": _detect_year(absolute_url, link_text),
-                "source_type": "PDF",
+                "source_type": MANIFEST_SOURCE_TYPE,
                 "url": absolute_url,
             }
         )
@@ -80,44 +76,44 @@ def _extract_pdf_rows(
     return rows
 
 
-def scrape_berkshire_letters(company_id: str, company_name: str, timeout_seconds: int = 20) -> List[Dict[str, str]]:
+def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
     return _extract_pdf_rows(
-        company_id=company_id,
-        company_name=company_name,
-        archive_url=ARCHIVE_SOURCES["berkshire_hathaway"],
+        company_id="berkshire_hathaway",
+        company_name="Berkshire Hathaway",
+        archive_url="https://www.berkshirehathaway.com/letters/letters.html",
         timeout_seconds=timeout_seconds,
     )
 
 
-def scrape_amazon_letters(company_id: str, company_name: str, timeout_seconds: int = 20) -> List[Dict[str, str]]:
+def scrape_amazon_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
     return _extract_pdf_rows(
-        company_id=company_id,
-        company_name=company_name,
-        archive_url=ARCHIVE_SOURCES["amazon"],
+        company_id="amazon",
+        company_name="Amazon",
+        archive_url="https://ir.aboutamazon.com/annual-reports-proxies-and-shareholder-letters/default.aspx",
         timeout_seconds=timeout_seconds,
     )
 
 
-def scrape_jpmorgan_letters(company_id: str, company_name: str, timeout_seconds: int = 20) -> List[Dict[str, str]]:
+def scrape_jpmorgan_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
     return _extract_pdf_rows(
-        company_id=company_id,
-        company_name=company_name,
-        archive_url=ARCHIVE_SOURCES["jpmorgan_chase"],
+        company_id="jpmorgan_chase",
+        company_name="JPMorgan Chase",
+        archive_url="https://www.jpmorganchase.com/ir/annual-report",
         timeout_seconds=timeout_seconds,
     )
 
 
-def scrape_blackrock_letters(company_id: str, company_name: str, timeout_seconds: int = 20) -> List[Dict[str, str]]:
+def scrape_blackrock_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
     return _extract_pdf_rows(
-        company_id=company_id,
-        company_name=company_name,
-        archive_url=ARCHIVE_SOURCES["blackrock"],
+        company_id="blackrock",
+        company_name="BlackRock",
+        archive_url="https://ir.blackrock.com/annual-reports-and-proxy",
         timeout_seconds=timeout_seconds,
     )
 
 
-def get_archive_scraper(company_id: str) -> Optional[Callable[[str, str, int], List[Dict[str, str]]]]:
-    scrapers: Dict[str, Callable[[str, str, int], List[Dict[str, str]]]] = {
+def get_archive_scraper(company_id: str) -> Optional[Callable[[], List[Dict[str, str]]]]:
+    scrapers: Dict[str, Callable[[], List[Dict[str, str]]]] = {
         "berkshire_hathaway": scrape_berkshire_letters,
         "amazon": scrape_amazon_letters,
         "jpmorgan_chase": scrape_jpmorgan_letters,

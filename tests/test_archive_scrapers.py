@@ -13,16 +13,18 @@ class ArchiveScrapersTests(unittest.TestCase):
         mock_get.return_value.text = """
             <html>
               <body>
-                <a href=\"/files/2024-shareholder-letter.pdf\">2024 Shareholder Letter</a>
-                <a href=\"https://cdn.example.com/docs/report-2023.pdf\">Annual report 2023</a>
-                <a href=\"/files/not-a-pdf.html\">Not a PDF</a>
+                <a href="/files/2024-shareholder-letter.pdf">2024 Shareholder Letter</a>
+                <a href="https://cdn.example.com/docs/report-2023.pdf">Annual report 2023</a>
+                <a href="/files/not-a-pdf.html">Not a PDF</a>
               </body>
             </html>
         """
 
-        rows = scrape_amazon_letters("amazon", "Amazon")
+        rows = scrape_amazon_letters()
 
         self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["company_id"], "amazon")
+        self.assertEqual(rows[0]["company_name"], "Amazon")
         self.assertEqual(rows[0]["year"], "2024")
         self.assertEqual(rows[1]["year"], "2023")
         self.assertTrue(rows[0]["url"].endswith("2024-shareholder-letter.pdf"))
