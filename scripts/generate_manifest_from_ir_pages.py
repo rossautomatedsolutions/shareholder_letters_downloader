@@ -67,26 +67,22 @@ MANIFEST_COLUMNS = [
     "source_type",
     "url",
 ]
-ACCEPT_URL_KEYWORDS = (
-    "letter-to-shareholders",
-    "shareholder-letter",
+ACCEPT_SHAREHOLDER_LETTER_KEYWORDS = (
+    "letter",
+    "shareholder",
     "ceo-letter",
+    "letter-to-shareholders",
     "chairman-letter",
-    "annual-letter",
 )
-ACCEPT_TEXT_KEYWORDS = ("letter", "ceo letter", "shareholder letter")
-EXCLUDE_URL_KEYWORDS = (
-    "corporate-data",
-    "shareholder-information",
-    "financial-data",
+REJECT_URL_KEYWORDS = (
+    "annual-report",
+    "10k",
     "proxy",
-    "presentation",
-    "transcript",
+    "proxy-statement",
+    "ballot",
+    "financials",
     "earnings",
-    "line-of-business",
-    "board",
-    "committee",
-    "supplement",
+    "presentation",
 )
 KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
     re.compile(r"/letters/[^/]*ltr\.pdf$"),
@@ -149,9 +145,7 @@ def is_candidate_link(url: str, text: str) -> bool:
     if ".pdf" not in parsed_path:
         return False
 
-    if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS) or any(
-        keyword in lowered_text for keyword in EXCLUDE_URL_KEYWORDS
-    ):
+    if any(keyword in lowered_url for keyword in REJECT_URL_KEYWORDS):
         return False
 
     if parsed_host in BERKSHIRE_HOSTS and any(
@@ -159,8 +153,8 @@ def is_candidate_link(url: str, text: str) -> bool:
     ):
         return True
 
-    return any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS) or any(
-        keyword in lowered_text for keyword in ACCEPT_TEXT_KEYWORDS
+    return any(keyword in lowered_url for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
+        keyword in lowered_text for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS
     )
 
 
@@ -288,6 +282,10 @@ def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict
         company_name = str(row.get("company_name", "")).strip()
         url = str(row.get("url", "")).strip()
         link_text = str(row.get("link_text", "")).strip()
+
+        if not is_valid_shareholder_letter(url, link_text):
+            continue
+
         extracted_year = detect_year(url, link_text)
         year = extracted_year or detect_year("", str(row.get("year", "")).strip())
 
