@@ -4,7 +4,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Iterable, List, Dict
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 
 def load_archive_scraper_getter():
@@ -55,11 +55,15 @@ EXCLUDE_URL_KEYWORDS = (
     "financial-data",
     "proxy",
     "presentation",
+    "transcript",
     "earnings",
     "line-of-business",
     "board",
     "committee",
     "supplement",
+)
+KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
+    re.compile(r"/letters/[^/]*ltr\.pdf$"),
 )
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 REQUEST_HEADERS = {
@@ -105,16 +109,29 @@ def detect_year(url: str, link_text: str) -> str:
     return ""
 
 
-def is_valid_shareholder_letter(url: str, text: str) -> bool:
+def is_candidate_link(url: str, text: str) -> bool:
     lowered_url = url.lower()
     lowered_text = text.lower()
+    parsed_path = urlparse(url).path.lower()
 
-    if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS):
+    if ".pdf" not in parsed_path:
         return False
+
+    if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS) or any(
+        keyword in lowered_text for keyword in EXCLUDE_URL_KEYWORDS
+    ):
+        return False
+
+    if any(pattern.search(parsed_path) for pattern in KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS):
+        return True
 
     return any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS) or any(
         keyword in lowered_text for keyword in ACCEPT_TEXT_KEYWORDS
     )
+
+
+def is_valid_shareholder_letter(url: str, text: str) -> bool:
+    return is_candidate_link(url, text)
 
 
 def request_with_retries(url: str, timeout_seconds: int):
@@ -168,7 +185,7 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
             continue
         absolute_url = urljoin(company.investor_relations_page, href)
         link_text = " ".join(link.get_text(" ", strip=True).split())
-        if not is_valid_shareholder_letter(absolute_url, link_text):
+        if not is_candidate_link(absolute_url, link_text):
             print(f"Rejected document: {absolute_url}")
             continue
         print(f"Accepted letter: {absolute_url}")
