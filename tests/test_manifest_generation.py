@@ -11,6 +11,7 @@ from scripts.generate_manifest_from_ir_pages import (
     CompanyDefinition,
     deduplicate_urls,
     fetch_candidates,
+    generate_manifest,
     is_candidate_link,
     is_valid_shareholder_letter,
     requests,
@@ -206,6 +207,59 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(mock_get.call_count, 2)
         mock_sleep.assert_called_once_with(1)
+
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    def test_generate_manifest_prefers_archive_scraper(self, mock_get_archive_scraper, mock_fetch_candidates, mock_sleep):
+        company = CompanyDefinition("berkshire_hathaway", "Berkshire Hathaway", "https://example.com")
+        archive_rows = [
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": "2024",
+                "source_type": "PDF",
+                "url": "https://www.berkshirehathaway.com/letters/2024ltr.pdf",
+            }
+        ]
+        mock_get_archive_scraper.return_value = mock.Mock(return_value=archive_rows)
+
+        frame = generate_manifest([company])
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["url"], "https://www.berkshirehathaway.com/letters/2024ltr.pdf")
+        mock_fetch_candidates.assert_not_called()
+        mock_sleep.assert_not_called()
+
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    def test_generate_manifest_uses_generic_path_when_archive_scraper_missing(
+        self, mock_get_archive_scraper, mock_fetch_candidates, mock_sleep
+    ):
+        company = CompanyDefinition("acme", "Acme", "https://example.com")
+        generic_rows = [
+            {
+                "company_id": "acme",
+                "company_name": "Acme",
+                "document_type": "shareholder_letter",
+                "year": "2023",
+                "source_type": "PDF",
+                "url": "https://example.com/2023-shareholder-letter.pdf",
+            }
+        ]
+        mock_get_archive_scraper.return_value = None
+        mock_fetch_candidates.return_value = generic_rows
+
+        frame = generate_manifest([company])
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["company_id"], "acme")
+        mock_fetch_candidates.assert_called_once_with(company)
+        mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":
