@@ -38,6 +38,14 @@ class ArchiveScrapersTests(unittest.TestCase):
             )
         )
 
+    def test_archive_candidate_filter_rejects_generic_letter_text_for_pdf(self):
+        self.assertFalse(
+            archive_scrapers._is_archive_letter_candidate(
+                "https://example.com/files/2024-overview.pdf",
+                "2024 Letter",
+            )
+        )
+
     def test_archive_candidate_filter_accepts_keyword_pdf(self):
         self.assertTrue(
             archive_scrapers._is_archive_letter_candidate(
@@ -45,6 +53,19 @@ class ArchiveScrapersTests(unittest.TestCase):
                 "Download",
             )
         )
+
+    @unittest.skipIf(archive_scrapers.requests is None, "requests is not installed")
+    @mock.patch("scripts.archive_scrapers.time.sleep")
+    @mock.patch("scripts.archive_scrapers.requests.get")
+    def test_extract_pdf_rows_returns_empty_on_retry_exhaustion(self, mock_get, mock_sleep):
+        fail_response = mock.Mock(status_code=429)
+        mock_get.return_value = fail_response
+
+        rows = archive_scrapers._extract_pdf_rows("acme", "Acme", "https://example.com/archive")
+
+        self.assertEqual(rows, [])
+        self.assertEqual(mock_get.call_count, 4)
+        self.assertEqual(mock_sleep.call_count, 3)
 
     def test_get_archive_scraper_returns_known_scraper(self):
         scraper = archive_scrapers.get_archive_scraper("amazon")

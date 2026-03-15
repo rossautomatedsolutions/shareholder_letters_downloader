@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -25,7 +26,13 @@ ACCEPT_URL_KEYWORDS = (
     "chairman-letter",
     "annual-letter",
 )
-ACCEPT_TEXT_KEYWORDS = ("letter", "ceo letter", "shareholder letter")
+ACCEPT_TEXT_KEYWORDS = (
+    "shareholder letter",
+    "letter to shareholders",
+    "ceo letter",
+    "chairman letter",
+    "annual letter",
+)
 EXCLUDE_KEYWORDS = (
     "corporate-data",
     "shareholder-information",
@@ -43,6 +50,32 @@ REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
 }
+RETRY_DELAYS_SECONDS = (1, 3, 5)
+RETRYABLE_STATUS_CODES = {403, 404, 429}
+
+
+def _request_with_retries(url: str, timeout_seconds: int):
+    if requests is None:
+        raise ModuleNotFoundError("requests is required to scrape archive pages.")
+
+    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
+        try:
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                if attempt < len(RETRY_DELAYS_SECONDS):
+                    time.sleep(RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                return None
+
+            response.raise_for_status()
+            return response
+        except requests.RequestException:
+            if attempt < len(RETRY_DELAYS_SECONDS):
+                time.sleep(RETRY_DELAYS_SECONDS[attempt])
+                continue
+            return None
+
+    return None
 
 
 def _is_archive_letter_candidate(url: str, text: str) -> bool:
@@ -77,8 +110,9 @@ def _extract_pdf_rows(company_id: str, company_name: str, archive_url: str) -> L
             "requests and beautifulsoup4 are required to scrape archive pages."
         )
 
-    response = requests.get(archive_url, headers=REQUEST_HEADERS, timeout=20)
-    response.raise_for_status()
+    response = _request_with_retries(archive_url, timeout_seconds=20)
+    if response is None:
+        return []
 
     soup = BeautifulSoup(response.text, "html.parser")
     rows: List[Dict[str, str]] = []
