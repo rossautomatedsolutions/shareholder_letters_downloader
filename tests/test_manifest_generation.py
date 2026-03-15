@@ -82,6 +82,24 @@ class ManifestGenerationTests(unittest.TestCase):
         )
         mock_import_module.assert_called_once_with("archive_scrapers")
 
+    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.util.find_spec")
+    def test_load_archive_scraper_getter_handles_missing_parent_package(
+        self, mock_find_spec, mock_import_module
+    ):
+        mock_find_spec.side_effect = [ModuleNotFoundError("No module named 'scripts'"), object()]
+        sentinel_getter = mock.Mock()
+        mock_import_module.return_value = mock.Mock(get_archive_scraper=sentinel_getter)
+
+        getter = load_archive_scraper_getter()
+
+        self.assertIs(getter, sentinel_getter)
+        self.assertEqual(
+            [call.args[0] for call in mock_find_spec.call_args_list],
+            ["scripts.archive_scrapers", "archive_scrapers"],
+        )
+        mock_import_module.assert_called_once_with("archive_scrapers")
+
     def test_is_valid_shareholder_letter_accepts_url_keywords(self):
         self.assertTrue(
             is_valid_shareholder_letter(
