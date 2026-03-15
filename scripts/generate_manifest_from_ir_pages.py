@@ -247,7 +247,11 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     companies_list = list(companies)
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
-        rows.extend(fetch_candidates(company))
+        archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
+        if archive_scraper is not None:
+            rows.extend(archive_scraper())
+        else:
+            rows.extend(fetch_candidates(company))
         if index < len(companies_list) - 1:
             time.sleep(2)
 
