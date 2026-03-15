@@ -102,6 +102,75 @@ class ManifestValidatorTests(unittest.TestCase):
             self.assertIn("invalid_url_pattern", reasons)
             self.assertIn("duplicate_company_year", reasons)
 
+
+    def test_validate_and_clean_manifest_normalizes_accepted_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_path = root / "letters_manifest.csv"
+            clean_output = root / "letters_manifest.cleaned.csv"
+            rejected_output = root / "rejected_manifest_rows.csv"
+
+            pd.DataFrame(
+                [
+                    {
+                        "company_id": "acme ",
+                        "company_name": " Acme",
+                        "document_type": "shareholder_letter ",
+                        "year": "2024 ",
+                        "source_type": "PDF ",
+                        "url": " https://example.com/acme-2024.pdf ",
+                    }
+                ]
+            ).to_csv(input_path, index=False)
+
+            summary = validate_and_clean_manifest(input_path, clean_output, rejected_output)
+
+            cleaned = pd.read_csv(clean_output, dtype=str, keep_default_na=False)
+
+            self.assertEqual(summary["rows_accepted"], 1)
+            self.assertEqual(cleaned.iloc[0]["company_id"], "acme")
+            self.assertEqual(cleaned.iloc[0]["company_name"], "Acme")
+            self.assertEqual(cleaned.iloc[0]["document_type"], "shareholder_letter")
+            self.assertEqual(cleaned.iloc[0]["year"], "2024")
+            self.assertEqual(cleaned.iloc[0]["source_type"], "PDF")
+            self.assertEqual(cleaned.iloc[0]["url"], "https://example.com/acme-2024.pdf")
+
+    def test_validate_and_clean_manifest_rejects_malformed_http_urls(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_path = root / "letters_manifest.csv"
+            clean_output = root / "letters_manifest.cleaned.csv"
+            rejected_output = root / "rejected_manifest_rows.csv"
+
+            pd.DataFrame(
+                [
+                    {
+                        "company_id": "acme",
+                        "company_name": "Acme",
+                        "document_type": "shareholder_letter",
+                        "year": "2024",
+                        "source_type": "PDF",
+                        "url": "https:///acme-2024.pdf",
+                    },
+                    {
+                        "company_id": "beta",
+                        "company_name": "Beta",
+                        "document_type": "shareholder_letter",
+                        "year": "2024",
+                        "source_type": "PDF",
+                        "url": "http:example.com/beta-2024.pdf",
+                    },
+                ]
+            ).to_csv(input_path, index=False)
+
+            summary = validate_and_clean_manifest(input_path, clean_output, rejected_output)
+
+            rejected = pd.read_csv(rejected_output, dtype=str, keep_default_na=False)
+
+            self.assertEqual(summary["rows_accepted"], 0)
+            self.assertEqual(summary["rows_rejected"], 2)
+            self.assertTrue((rejected["rejection_reason"] == "invalid_url_scheme").all())
+
     def test_missing_required_columns_raises_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

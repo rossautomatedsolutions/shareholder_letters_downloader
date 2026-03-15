@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict
+from urllib.parse import urlparse
 
 try:
     import pandas as pd
@@ -47,9 +48,12 @@ def _row_rejection_reason(row) -> str:
     if document_type != EXPECTED_DOCUMENT_TYPE:
         return "invalid_document_type"
 
-    url = _normalize_text(row["url"]).lower()
-    if not url.startswith("http"):
+    url = _normalize_text(row["url"])
+    parsed_url = urlparse(url)
+    if parsed_url.scheme.lower() not in {"http", "https"} or not parsed_url.netloc:
         return "invalid_url_scheme"
+
+    url = url.lower()
 
     if any(pattern in url for pattern in INVALID_URL_SUBSTRINGS):
         return "invalid_url_pattern"
@@ -76,7 +80,11 @@ def validate_and_clean_manifest(
     frame = pd.read_csv(input_path, dtype=str, keep_default_na=False)
     _validate_required_columns(frame)
 
-    annotated = frame.copy()
+    normalized_frame = frame.copy()
+    for column in normalized_frame.columns:
+        normalized_frame[column] = normalized_frame[column].map(_normalize_text)
+
+    annotated = normalized_frame.copy()
     annotated["rejection_reason"] = annotated.apply(_row_rejection_reason, axis=1)
 
     valid_rows = annotated[annotated["rejection_reason"] == ""].drop(columns=["rejection_reason"])
