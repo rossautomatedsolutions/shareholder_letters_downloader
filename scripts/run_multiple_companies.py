@@ -1,9 +1,10 @@
 import argparse
 import csv
+import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Sequence, Tuple
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,8 +23,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=Path("output"))
     parser.add_argument("--reports-dir", type=Path, default=Path("reports"))
     parser.add_argument("--config", type=Path, default=Path("config/rendering_overrides.json"))
-    parser.add_argument("--retries", type=int, default=2)
-    parser.add_argument("--timeout-seconds", type=int, default=45)
+    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--timeout-seconds", type=int, default=60)
     parser.add_argument("--preflight-urls", action="store_true")
     parser.add_argument(
         "--stop-on-error",
@@ -44,7 +45,16 @@ def load_company_ids(manifest: Path) -> List[str]:
     return company_ids
 
 
-def run_company(company_id: str, args: argparse.Namespace) -> int:
+def report_files(reports_dir: Path) -> Sequence[Path]:
+    return sorted(reports_dir.glob("run_report_*.json"))
+
+
+def report_has_failures(report_path: Path) -> bool:
+    rows = json.loads(report_path.read_text(encoding="utf-8"))
+    return any((row.get("status") or "").strip().lower() == "failed" for row in rows)
+
+
+def run_company(company_id: str, args: argparse.Namespace) -> Tuple[int, bool]:
     cmd = [
         sys.executable,
         "export_letters.py",
@@ -66,10 +76,21 @@ def run_company(company_id: str, args: argparse.Namespace) -> int:
     if args.preflight_urls:
         cmd.append("--preflight-urls")
 
+    before_reports = set(report_files(args.reports_dir))
+
     print(f"\n=== Running company: {company_id} ===")
     print("$", " ".join(cmd))
     completed = subprocess.run(cmd)
-    return completed.returncode
+
+    after_reports = set(report_files(args.reports_dir))
+    new_reports = sorted(after_reports - before_reports)
+    had_row_failures = False
+    if completed.returncode == 0 and new_reports:
+        had_row_failures = report_has_failures(new_reports[-1])
+        if had_row_failures:
+            print(f"Company '{company_id}' completed with failed rows in report: {new_reports[-1]}")
+
+    return completed.returncode, had_row_failures
 
 
 def iterate_companies(args: argparse.Namespace) -> Iterable[str]:
@@ -81,8 +102,8 @@ def main() -> None:
     failed = []
 
     for company_id in iterate_companies(args):
-        rc = run_company(company_id, args)
-        if rc != 0:
+        rc, had_row_failures = run_company(company_id, args)
+        if rc != 0 or had_row_failures:
             failed.append(company_id)
             if args.stop_on_error:
                 break
