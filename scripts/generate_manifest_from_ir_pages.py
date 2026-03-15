@@ -167,10 +167,21 @@ def request_with_retries(url: str, timeout_seconds: int):
 
 
 def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> List[Dict[str, str]]:
+    if get_archive_scraper is not None:
+        archive_scraper = get_archive_scraper(company.company_id)
+        if archive_scraper is not None:
+            print(f"Scanning archive page for company: {company.company_id}")
+            return archive_scraper(
+                company.company_name,
+                request_with_retries=request_with_retries,
+                timeout_seconds=timeout_seconds,
+            )
+
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
             "requests and beautifulsoup4 are required to scan investor relations pages."
         )
+
     print(f"Scanning company: {company.company_id}")
     response = request_with_retries(company.investor_relations_page, timeout_seconds=timeout_seconds)
     if response is None:

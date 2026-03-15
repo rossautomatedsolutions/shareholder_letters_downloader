@@ -13,6 +13,7 @@ from scripts.generate_manifest_from_ir_pages import (
     fetch_candidates,
     is_candidate_link,
     is_valid_shareholder_letter,
+    BeautifulSoup,
     requests,
     validate_manifest_schema,
 )
@@ -152,6 +153,24 @@ class ManifestGenerationTests(unittest.TestCase):
                 "https://example.com/proxy/shareholder-letter-2024.pdf",
                 "2024 Shareholder Letter",
             )
+        )
+
+
+    @unittest.skipIf(BeautifulSoup is None, "beautifulsoup4 is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    def test_fetch_candidates_uses_archive_scraper_when_available(self, mock_get_archive_scraper):
+        mock_scraper = mock.Mock(return_value=[{"url": "https://example.com/2024-shareholder-letter.pdf"}])
+        mock_get_archive_scraper.return_value = mock_scraper
+        company = CompanyDefinition("blackrock", "BlackRock", "https://example.com/ir")
+
+        rows = fetch_candidates(company, timeout_seconds=30)
+
+        self.assertEqual(rows, [{"url": "https://example.com/2024-shareholder-letter.pdf"}])
+        mock_get_archive_scraper.assert_called_once_with("blackrock")
+        mock_scraper.assert_called_once_with(
+            "BlackRock",
+            request_with_retries=mock.ANY,
+            timeout_seconds=30,
         )
 
     @unittest.skipIf(requests is None, "requests is not installed")
