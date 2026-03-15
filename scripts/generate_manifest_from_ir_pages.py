@@ -201,6 +201,8 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
         href = link.get("href", "").strip()
         if not href:
             continue
+        if ".pdf" not in href.lower():
+            continue
         absolute_url = urljoin(company.investor_relations_page, href)
         link_text = " ".join(link.get_text(" ", strip=True).split())
         if not is_candidate_link(absolute_url, link_text):
