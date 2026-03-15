@@ -80,6 +80,7 @@ KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
 )
 BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
+BERKSHIRE_YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -220,6 +221,53 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
+def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
+    if requests is None or BeautifulSoup is None:
+        raise ModuleNotFoundError(
+            "requests and beautifulsoup4 are required to scrape Berkshire Hathaway letters."
+        )
+
+    source_page = "https://www.berkshirehathaway.com/letters/letters.html"
+    response = request_with_retries(source_page, timeout_seconds=timeout_seconds)
+    if response is None:
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    rows: List[Dict[str, str]] = []
+    seen_urls = set()
+
+    for link in soup.find_all("a", href=True):
+        href = link.get("href", "").strip()
+        if not href:
+            continue
+
+        absolute_url = urljoin(source_page, href)
+        parsed_path = urlparse(absolute_url).path.lower()
+        if ".pdf" not in parsed_path:
+            continue
+
+        if absolute_url in seen_urls:
+            continue
+        seen_urls.add(absolute_url)
+
+        year_match = BERKSHIRE_YEAR_PATTERN.search(absolute_url)
+        year = year_match.group(0) if year_match else ""
+
+        rows.append(
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": year,
+                "source_type": "PDF",
+                "url": absolute_url,
+            }
+        )
+
+    rows.sort(key=lambda row: (int(row["year"]) if row["year"].isdigit() else -1, row["url"]), reverse=True)
+    return rows
+
+
 def deduplicate_urls(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     seen_urls = set()
     deduped: List[Dict[str, str]] = []
@@ -260,6 +308,29 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     companies_list = list(companies)
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
+        if company.company_id == "berkshire_hathaway":
+            company_rows = scrape_berkshire_letters()
+            if company_rows:
+                rows.extend(company_rows)
+            else:
+                print(
+                    "Berkshire scraper returned no candidates; "
+                    "falling back to archive scraper or IR-page scan."
+                )
+                archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
+                if archive_scraper is not None:
+                    archive_rows = archive_scraper()
+                    if archive_rows:
+                        rows.extend(archive_rows)
+                    else:
+                        rows.extend(fetch_candidates(company))
+                else:
+                    rows.extend(fetch_candidates(company))
+
+            if index < len(companies_list) - 1:
+                time.sleep(2)
+            continue
+
         archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
         company_rows: List[Dict[str, str]]
         if archive_scraper is not None:

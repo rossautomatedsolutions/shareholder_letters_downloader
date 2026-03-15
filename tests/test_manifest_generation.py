@@ -13,6 +13,7 @@ from scripts.generate_manifest_from_ir_pages import (
     fetch_candidates,
     generate_manifest,
     is_candidate_link,
+    scrape_berkshire_letters,
     is_valid_shareholder_letter,
     load_archive_scraper_getter,
     requests,
@@ -228,6 +229,40 @@ class ManifestGenerationTests(unittest.TestCase):
         )
 
     @unittest.skipIf(requests is None, "requests is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
+    def test_scrape_berkshire_letters_extracts_all_pdf_links_and_sorts_desc(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            status_code=200,
+            text="""
+                <html>
+                    <body>
+                        <a href="/letters/2024ltr.pdf">2024 Letter</a>
+                        <a href="https://www.berkshirehathaway.com/letters/2019ltr.pdf?download=1">2019 Letter</a>
+                        <a href="/letters/no-year-letter.pdf">No year</a>
+                        <a href="/letters/readme.txt">Not PDF</a>
+                    </body>
+                </html>
+            """,
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        rows = scrape_berkshire_letters()
+
+        self.assertEqual(
+            [row["url"] for row in rows],
+            [
+                "https://www.berkshirehathaway.com/letters/2024ltr.pdf",
+                "https://www.berkshirehathaway.com/letters/2019ltr.pdf?download=1",
+                "https://www.berkshirehathaway.com/letters/no-year-letter.pdf",
+            ],
+        )
+        self.assertEqual([row["year"] for row in rows], ["2024", "2019", ""])
+        self.assertTrue(all(row["company_id"] == "berkshire_hathaway" for row in rows))
+        self.assertTrue(all(row["company_name"] == "Berkshire Hathaway" for row in rows))
+        self.assertTrue(all(row["document_type"] == "shareholder_letter" for row in rows))
+        self.assertTrue(all(row["source_type"] == "PDF" for row in rows))
+
+    @unittest.skipIf(requests is None, "requests is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
     @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
     def test_fetch_candidates_retries_after_http_403(self, mock_get, mock_sleep):
@@ -252,6 +287,39 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(mock_get.call_count, 2)
         mock_sleep.assert_called_once_with(1)
+
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.scrape_berkshire_letters")
+    def test_generate_manifest_prefers_dedicated_berkshire_scraper(
+        self,
+        mock_scrape_berkshire_letters,
+        mock_get_archive_scraper,
+        mock_fetch_candidates,
+        mock_sleep,
+    ):
+        company = CompanyDefinition("berkshire_hathaway", "Berkshire Hathaway", "https://example.com")
+        mock_scrape_berkshire_letters.return_value = [
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": "2024",
+                "source_type": "PDF",
+                "url": "https://www.berkshirehathaway.com/letters/2024ltr.pdf",
+            }
+        ]
+
+        frame = generate_manifest([company])
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["url"], "https://www.berkshirehathaway.com/letters/2024ltr.pdf")
+        mock_scrape_berkshire_letters.assert_called_once_with()
+        mock_get_archive_scraper.assert_not_called()
+        mock_fetch_candidates.assert_not_called()
+        mock_sleep.assert_not_called()
 
     @unittest.skipIf(pd is None, "pandas is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
