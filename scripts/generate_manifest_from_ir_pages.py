@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 import re
 import sys
 import time
@@ -16,6 +17,18 @@ def load_archive_scraper_getter():
             sys.path.insert(0, str(scripts_dir))
 
     for module_name in module_names:
+        try:
+            module_spec = importlib.util.find_spec(module_name)
+        except ModuleNotFoundError as exc:
+            missing_name = getattr(exc, "name", None)
+            top_level_package = module_name.split(".")[0]
+            if missing_name in (module_name, top_level_package):
+                continue
+            raise
+
+        if module_spec is None:
+            continue
+
         try:
             module = importlib.import_module(module_name)
         except ModuleNotFoundError as exc:
@@ -222,6 +235,47 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
+def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
+    if requests is None or BeautifulSoup is None:
+        raise ModuleNotFoundError(
+            "requests and beautifulsoup4 are required to scrape Berkshire letters."
+        )
+
+    source_url = "https://www.berkshirehathaway.com/letters/letters.html"
+    response = request_with_retries(source_url, timeout_seconds=timeout_seconds)
+    if response is None:
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    rows: List[Dict[str, str]] = []
+    seen_urls = set()
+
+    for link in soup.find_all("a", href=True):
+        href = link.get("href", "").strip()
+        if not href:
+            continue
+        absolute_url = urljoin(source_url, href)
+        if ".pdf" not in urlparse(absolute_url).path.lower():
+            continue
+        if absolute_url in seen_urls:
+            continue
+        seen_urls.add(absolute_url)
+        year_match = re.search(r"(19|20)\d{2}", absolute_url)
+        year = year_match.group(0) if year_match else ""
+        rows.append(
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": year,
+                "source_type": "PDF",
+                "url": absolute_url,
+            }
+        )
+
+    return sorted(rows, key=lambda row: (row["year"], row["url"]), reverse=True)
+
+
 def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict[str, str]], int]:
     normalized_rows: List[Dict[str, str]] = []
     skipped_missing_year = 0
@@ -292,18 +346,24 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     companies_list = list(companies)
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
-        archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
-        company_rows: List[Dict[str, str]]
-        if archive_scraper is not None:
-            company_rows = archive_scraper()
-            if company_rows:
-                rows.extend(company_rows)
-            else:
-                print(
-                    f"Archive scraper returned no candidates for {company.company_id}; "
-                    "falling back to IR-page scan."
-                )
-                rows.extend(fetch_candidates(company))
+        company_rows: List[Dict[str, str]] = []
+        if company.company_id == "berkshire_hathaway":
+            company_rows = scrape_berkshire_letters()
+            if not company_rows:
+                print("Dedicated Berkshire scraper returned no candidates; falling back.")
+
+        if not company_rows:
+            archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
+            if archive_scraper is not None:
+                company_rows = archive_scraper()
+                if not company_rows:
+                    print(
+                        f"Archive scraper returned no candidates for {company.company_id}; "
+                        "falling back to IR-page scan."
+                    )
+
+        if company_rows:
+            rows.extend(company_rows)
         else:
             rows.extend(fetch_candidates(company))
         if index < len(companies_list) - 1:

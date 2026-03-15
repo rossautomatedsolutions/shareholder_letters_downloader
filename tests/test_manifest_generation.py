@@ -17,6 +17,7 @@ from scripts.generate_manifest_from_ir_pages import (
     is_candidate_link,
     is_valid_shareholder_letter,
     load_archive_scraper_getter,
+    scrape_berkshire_letters,
     requests,
     validate_manifest_schema,
 )
@@ -118,14 +119,13 @@ class ManifestGenerationTests(unittest.TestCase):
 
 
     @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.util.find_spec")
     def test_load_archive_scraper_getter_falls_back_to_direct_module_for_script_execution(
-        self, mock_import_module
+        self, mock_find_spec, mock_import_module
     ):
         sentinel_getter = mock.Mock()
-        missing_scripts_package = ModuleNotFoundError("No module named 'scripts'")
-        missing_scripts_package.name = "scripts"
+        mock_find_spec.side_effect = [None, object()]
         mock_import_module.side_effect = [
-            missing_scripts_package,
             mock.Mock(get_archive_scraper=sentinel_getter),
         ]
 
@@ -134,18 +134,23 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertIs(getter, sentinel_getter)
         self.assertEqual(
             [call.args[0] for call in mock_import_module.call_args_list],
+            ["archive_scrapers"],
+        )
+        self.assertEqual(
+            [call.args[0] for call in mock_find_spec.call_args_list],
             ["scripts.archive_scrapers", "archive_scrapers"],
         )
 
     @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.util.find_spec")
     def test_load_archive_scraper_getter_handles_missing_parent_package(
-        self, mock_import_module
+        self, mock_find_spec, mock_import_module
     ):
         sentinel_getter = mock.Mock()
         missing_scripts_package = ModuleNotFoundError("No module named 'scripts'")
         missing_scripts_package.name = "scripts"
+        mock_find_spec.side_effect = [missing_scripts_package, object()]
         mock_import_module.side_effect = [
-            missing_scripts_package,
             mock.Mock(get_archive_scraper=sentinel_getter),
         ]
 
@@ -154,8 +159,85 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertIs(getter, sentinel_getter)
         self.assertEqual(
             [call.args[0] for call in mock_import_module.call_args_list],
+            ["archive_scrapers"],
+        )
+        self.assertEqual(
+            [call.args[0] for call in mock_find_spec.call_args_list],
             ["scripts.archive_scrapers", "archive_scrapers"],
         )
+
+    @unittest.skipIf(requests is None, "requests is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
+    def test_scrape_berkshire_letters_extracts_all_pdf_links(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            status_code=200,
+            text='''
+                <html>
+                    <body>
+                        <a href="/letters/2024ltr.pdf">2024 Letter</a>
+                        <a href="https://www.berkshirehathaway.com/letters/2023ltr.pdf?download=1">2023 Letter</a>
+                        <a href="https://www.berkshirehathaway.com/docs/letter-archive.pdf">Archive PDF</a>
+                        <a href="/letters/letters.html">html</a>
+                    </body>
+                </html>
+            ''',
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        rows = scrape_berkshire_letters()
+
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(row["url"].lower().endswith(".pdf") or ".pdf?" in row["url"].lower() for row in rows))
+        self.assertTrue(all(row["company_id"] == "berkshire_hathaway" for row in rows))
+
+    @unittest.skipIf(requests is None, "requests is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
+    def test_scrape_berkshire_letters_parses_year_from_url_regex(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            status_code=200,
+            text='''
+                <html>
+                    <body>
+                        <a href="/letters/2024ltr.pdf">Letter</a>
+                        <a href="/letters/latestltr.pdf">Latest</a>
+                    </body>
+                </html>
+            ''',
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        rows = scrape_berkshire_letters()
+
+        row_by_url = {row["url"]: row for row in rows}
+        self.assertEqual(
+            row_by_url["https://www.berkshirehathaway.com/letters/2024ltr.pdf"]["year"],
+            "2024",
+        )
+        self.assertEqual(
+            row_by_url["https://www.berkshirehathaway.com/letters/latestltr.pdf"]["year"],
+            "",
+        )
+
+    @unittest.skipIf(requests is None, "requests is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
+    def test_scrape_berkshire_letters_sorts_descending_by_year(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            status_code=200,
+            text='''
+                <html>
+                    <body>
+                        <a href="/letters/2022ltr.pdf">2022</a>
+                        <a href="/letters/2024ltr.pdf">2024</a>
+                        <a href="/letters/2023ltr.pdf">2023</a>
+                    </body>
+                </html>
+            ''',
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        rows = scrape_berkshire_letters()
+
+        self.assertEqual([row["year"] for row in rows], ["2024", "2023", "2022"])
 
     def test_is_valid_shareholder_letter_accepts_url_keywords(self):
         self.assertTrue(
@@ -320,9 +402,16 @@ class ManifestGenerationTests(unittest.TestCase):
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
     @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
     @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
-    def test_generate_manifest_prefers_archive_scraper(self, mock_get_archive_scraper, mock_fetch_candidates, mock_sleep):
+    @mock.patch("scripts.generate_manifest_from_ir_pages.scrape_berkshire_letters")
+    def test_generate_manifest_prefers_dedicated_berkshire_scraper_first(
+        self,
+        mock_scrape_berkshire_letters,
+        mock_get_archive_scraper,
+        mock_fetch_candidates,
+        mock_sleep,
+    ):
         company = CompanyDefinition("berkshire_hathaway", "Berkshire Hathaway", "https://example.com")
-        archive_rows = [
+        dedicated_rows = [
             {
                 "company_id": "berkshire_hathaway",
                 "company_name": "Berkshire Hathaway",
@@ -332,15 +421,95 @@ class ManifestGenerationTests(unittest.TestCase):
                 "url": "https://www.berkshirehathaway.com/letters/2024ltr.pdf",
             }
         ]
-        mock_get_archive_scraper.return_value = mock.Mock(return_value=archive_rows)
+        mock_scrape_berkshire_letters.return_value = dedicated_rows
+        mock_get_archive_scraper.return_value = mock.Mock(return_value=[])
 
         frame = generate_manifest([company])
 
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["url"], "https://www.berkshirehathaway.com/letters/2024ltr.pdf")
+        mock_scrape_berkshire_letters.assert_called_once_with()
+        mock_get_archive_scraper.assert_not_called()
         mock_fetch_candidates.assert_not_called()
         mock_sleep.assert_not_called()
 
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.scrape_berkshire_letters")
+    def test_generate_manifest_berkshire_falls_back_to_archive_then_generic(
+        self,
+        mock_scrape_berkshire_letters,
+        mock_get_archive_scraper,
+        mock_fetch_candidates,
+        mock_sleep,
+    ):
+        company = CompanyDefinition("berkshire_hathaway", "Berkshire Hathaway", "https://example.com")
+        mock_scrape_berkshire_letters.return_value = []
+        archive_rows = [
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": "2023",
+                "source_type": "PDF",
+                "url": "https://www.berkshirehathaway.com/letters/2023ltr.pdf",
+            }
+        ]
+        mock_get_archive_scraper.return_value = mock.Mock(return_value=archive_rows)
+
+        frame = generate_manifest([company])
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["url"], "https://www.berkshirehathaway.com/letters/2023ltr.pdf")
+        mock_scrape_berkshire_letters.assert_called_once_with()
+        mock_get_archive_scraper.assert_called_once_with("berkshire_hathaway")
+        mock_fetch_candidates.assert_not_called()
+        mock_sleep.assert_not_called()
+
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.scrape_berkshire_letters")
+    def test_generate_manifest_berkshire_falls_back_to_generic_when_archive_empty(
+        self,
+        mock_scrape_berkshire_letters,
+        mock_get_archive_scraper,
+        mock_fetch_candidates,
+        mock_sleep,
+    ):
+        company = CompanyDefinition("berkshire_hathaway", "Berkshire Hathaway", "https://example.com")
+        mock_scrape_berkshire_letters.return_value = []
+        mock_get_archive_scraper.return_value = mock.Mock(return_value=[])
+        mock_fetch_candidates.return_value = [
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": "2022",
+                "source_type": "PDF",
+                "url": "https://example.com/2022-letter.pdf",
+            }
+        ]
+
+        frame = generate_manifest([company])
+
+        self.assertEqual(len(frame), 1)
+        mock_scrape_berkshire_letters.assert_called_once_with()
+        mock_get_archive_scraper.assert_called_once_with("berkshire_hathaway")
+        mock_fetch_candidates.assert_called_once_with(company)
+        mock_sleep.assert_not_called()
+
+    def test_regression_loader_find_spec_and_berkshire_routing_coexist_in_same_module(self):
+        with open("scripts/generate_manifest_from_ir_pages.py", encoding="utf-8") as source_file:
+            source = source_file.read()
+
+        self.assertIn("importlib.util.find_spec", source)
+        self.assertIn("for module_name in module_names", source)
+        self.assertIn('if company.company_id == "berkshire_hathaway"', source)
+        self.assertIn("company_rows = scrape_berkshire_letters()", source)
 
     @unittest.skipIf(pd is None, "pandas is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
