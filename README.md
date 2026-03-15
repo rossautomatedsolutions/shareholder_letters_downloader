@@ -84,6 +84,43 @@ Runtime reliability features include:
 - categorized errors in reports (timeouts, SSL, DNS/connection, HTTP classes)
 - per-company rendering overrides via `config/rendering_overrides.json`
 
+
+
+## Running multiple companies in batches
+
+Use the helper script to run one company at a time (useful for retries and smoke tests):
+
+```bash
+python scripts/run_multiple_companies.py --preflight-urls
+```
+
+Run only a subset:
+
+```bash
+python scripts/run_multiple_companies.py --companies berkshire_hathaway apple microsoft
+```
+
+Stop as soon as one company fails:
+
+```bash
+python scripts/run_multiple_companies.py --stop-on-error
+```
+
+## Preparing your own company link data
+
+1. Copy the template:
+
+```bash
+cp manifests/letters_manifest.template.csv manifests/letters_manifest.csv
+```
+
+2. Populate rows with real `url` values and keep `(company_id, document_type, year)` unique.
+3. Validate links before download/render:
+
+```bash
+python export_letters.py --preflight-urls
+```
+
 ## Testing
 
 Run:

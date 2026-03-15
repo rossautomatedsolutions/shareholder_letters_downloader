@@ -1,0 +1,3 @@
+company_id,company_name,document_type,year,source_type,url,language,fiscal_year_end,notes
+apple,Apple Inc.,shareholder_letter,2024,PDF,https://investor.apple.com/example-letter-2024.pdf,en,09-30,
+microsoft,Microsoft Corporation,annual_letter,2024,HTML,https://www.microsoft.com/investor/example-letter-2024,en,06-30,
