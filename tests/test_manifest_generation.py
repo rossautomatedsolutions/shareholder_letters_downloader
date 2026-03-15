@@ -14,6 +14,7 @@ from scripts.generate_manifest_from_ir_pages import (
     generate_manifest,
     is_candidate_link,
     is_valid_shareholder_letter,
+    load_archive_scraper_getter,
     requests,
     validate_manifest_schema,
 )
@@ -62,6 +63,24 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertEqual(len(deduped), 1)
         self.assertEqual(deduped[0]["url"], "https://example.com/acme-letter.pdf")
 
+
+    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.util.find_spec")
+    def test_load_archive_scraper_getter_falls_back_to_direct_module_for_script_execution(
+        self, mock_find_spec, mock_import_module
+    ):
+        mock_find_spec.side_effect = [None, object()]
+        sentinel_getter = mock.Mock()
+        mock_import_module.return_value = mock.Mock(get_archive_scraper=sentinel_getter)
+
+        getter = load_archive_scraper_getter()
+
+        self.assertIs(getter, sentinel_getter)
+        self.assertEqual(
+            [call.args[0] for call in mock_find_spec.call_args_list],
+            ["scripts.archive_scrapers", "archive_scrapers"],
+        )
+        mock_import_module.assert_called_once_with("archive_scrapers")
 
     def test_is_valid_shareholder_letter_accepts_url_keywords(self):
         self.assertTrue(
