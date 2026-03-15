@@ -4,7 +4,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 try:
     import requests
@@ -24,7 +24,11 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik}.json"
 FILING_INDEX_URL_TEMPLATE = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/index.json"
 ARCHIVES_BASE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{filename}"
-KEYWORDS = ("letter", "shareholder", "chairman")
+TARGET_PHRASES = (
+    "letter to shareholders",
+    "ceo letter",
+    "chairman letter",
+)
 USER_AGENT = "shareholder-letters-downloader/1.0 (contact: ops@example.com)"
 
 
@@ -67,6 +71,11 @@ class SecClient:
 
 def normalize_company_id(ticker: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", ticker.lower()).strip("_")
+
+
+
+def normalize_for_matching(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
 
@@ -136,13 +145,23 @@ def accession_without_dashes(accession_number: str) -> str:
 
 
 
-def looks_like_letter_pdf(filename: str) -> bool:
+def detect_source_type(filename: str) -> Optional[str]:
     lowered = filename.lower()
-    return lowered.endswith(".pdf") and any(keyword in lowered for keyword in KEYWORDS)
+    if lowered.endswith(".pdf"):
+        return "PDF"
+    if lowered.endswith(".htm") or lowered.endswith(".html"):
+        return "HTML"
+    return None
 
 
 
-def discover_letter_pdfs_for_filing(client: SecClient, cik: str, accession_number: str) -> List[str]:
+def has_target_phrase(*values: str) -> bool:
+    haystack = " ".join(normalize_for_matching(value) for value in values if value)
+    return any(phrase in haystack for phrase in TARGET_PHRASES)
+
+
+
+def discover_letter_documents_for_filing(client: SecClient, cik: str, accession_number: str) -> List[Dict[str, str]]:
     accession_compact = accession_without_dashes(accession_number)
     index_url = FILING_INDEX_URL_TEMPLATE.format(cik=str(int(cik)), accession=accession_compact)
 
@@ -153,13 +172,19 @@ def discover_letter_pdfs_for_filing(client: SecClient, cik: str, accession_numbe
         return []
 
     items = index_json.get("directory", {}).get("item", [])
-    matches: List[str] = []
+    matches: List[Dict[str, str]] = []
     for item in items:
-        name = str(item.get("name", ""))
-        if not looks_like_letter_pdf(name):
+        filename = str(item.get("name", ""))
+        source_type = detect_source_type(filename)
+        if source_type is None:
             continue
-        url = ARCHIVES_BASE_URL.format(cik=str(int(cik)), accession=accession_compact, filename=name)
-        matches.append(url)
+        item_text = str(item.get("type", ""))
+        href_text = str(item.get("href", ""))
+        if not has_target_phrase(filename, item_text, href_text):
+            continue
+
+        url = ARCHIVES_BASE_URL.format(cik=str(int(cik)), accession=accession_compact, filename=filename)
+        matches.append({"source_type": source_type, "url": url})
     return matches
 
 
@@ -179,16 +204,20 @@ def generate_rows(client: SecClient, companies: Iterable[Company], years: int) -
         ten_k_filings = filter_10k_filings(recent_filings, years=years)
         for filing in ten_k_filings:
             filing_year = (filing.report_date or filing.filing_date)[:4]
-            pdf_urls = discover_letter_pdfs_for_filing(client, cik=company.cik, accession_number=filing.accession_number)
-            for pdf_url in pdf_urls:
+            documents = discover_letter_documents_for_filing(
+                client,
+                cik=company.cik,
+                accession_number=filing.accession_number,
+            )
+            for document in documents:
                 rows.append(
                     {
                         "company_id": normalize_company_id(company.ticker),
                         "company_name": company.name,
                         "document_type": "shareholder_letter",
                         "year": filing_year,
-                        "source_type": "PDF",
-                        "url": pdf_url,
+                        "source_type": document["source_type"],
+                        "url": document["url"],
                     }
                 )
     return rows

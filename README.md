@@ -141,11 +141,13 @@ Review the generated rows, verify that each URL is a valid shareholder letter, a
 
 ### Optional SEC EDGAR-based generator
 
-You can also generate a manifest from SEC EDGAR submissions by scanning recent `10-K` filings and matching PDF filenames that contain one of:
+You can also generate a backup manifest from SEC EDGAR submissions by scanning recent `10-K` filing indexes and extracting links that match:
 
-- `letter`
-- `shareholder`
-- `chairman`
+- `Letter to Shareholders`
+- `CEO Letter`
+- `Chairman Letter`
+
+Both `HTML` and `PDF` links are supported so this can supplement the IR-page scraper output.
 
 Example:
 
