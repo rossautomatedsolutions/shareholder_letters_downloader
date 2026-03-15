@@ -55,6 +55,13 @@ Optional URL preflight validation:
 python export_letters.py --preflight-urls
 ```
 
+Extract/refresh letter metadata from downloaded PDFs:
+
+```bash
+python scripts/extract_letter_metadata.py
+```
+
+
 ## Output behavior
 
 For each row, the pipeline writes:
