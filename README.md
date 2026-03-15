@@ -148,6 +148,28 @@ python scripts/generate_manifest_from_sec.py --tickers AAPL MSFT AMZN JPM --year
 
 This writes `manifests/letters_manifest.sec.csv` with rows in the standard manifest schema (`company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`).
 
+## Dataset summary report
+
+Generate a summary of downloaded letters from the `output/` directory:
+
+```bash
+python scripts/generate_dataset_summary.py
+```
+
+This writes `reports/dataset_summary.json` with:
+
+- `number_of_companies` / `total_companies`
+- `total_letters`
+- `year_range`
+- `letters_per_company`
+- `missing_years`
+
+You can override paths:
+
+```bash
+python scripts/generate_dataset_summary.py --output-root output --report-path reports/dataset_summary.json
+```
+
 ## Testing
 
 Run:
