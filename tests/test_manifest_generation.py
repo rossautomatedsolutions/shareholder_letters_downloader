@@ -11,6 +11,7 @@ from scripts.generate_manifest_from_ir_pages import (
     CompanyDefinition,
     deduplicate_urls,
     fetch_candidates,
+    is_candidate_link,
     is_valid_shareholder_letter,
     requests,
     validate_manifest_schema,
@@ -75,6 +76,22 @@ class ManifestGenerationTests(unittest.TestCase):
             )
         )
 
+    def test_is_candidate_link_accepts_berkshire_letters_ltr_pdf_with_year_only_text(self):
+        self.assertTrue(
+            is_candidate_link(
+                "https://www.berkshirehathaway.com/letters/2024ltr.pdf",
+                "2024",
+            )
+        )
+
+    def test_is_candidate_link_accepts_berkshire_letters_ltr_pdf_with_query(self):
+        self.assertTrue(
+            is_candidate_link(
+                "https://www.berkshirehathaway.com/letters/2024ltr.pdf?source=archive",
+                "2024",
+            )
+        )
+
     def test_is_valid_shareholder_letter_accepts_text_keywords(self):
         self.assertTrue(
             is_valid_shareholder_letter(
@@ -89,6 +106,14 @@ class ManifestGenerationTests(unittest.TestCase):
             )
         )
 
+    def test_is_candidate_link_rejects_non_pdf_even_with_letter_text(self):
+        self.assertFalse(
+            is_candidate_link(
+                "https://example.com/letters/2024-shareholder-letter",
+                "2024 Shareholder Letter",
+            )
+        )
+
     def test_is_valid_shareholder_letter_rejects_non_letter_documents(self):
         self.assertFalse(
             is_valid_shareholder_letter(
@@ -100,6 +125,12 @@ class ManifestGenerationTests(unittest.TestCase):
             is_valid_shareholder_letter(
                 "https://example.com/investor-presentation-q4.pdf",
                 "Q4 presentation",
+            )
+        )
+        self.assertFalse(
+            is_valid_shareholder_letter(
+                "https://example.com/q4-transcript.pdf",
+                "Q4 earnings transcript",
             )
         )
         self.assertFalse(
