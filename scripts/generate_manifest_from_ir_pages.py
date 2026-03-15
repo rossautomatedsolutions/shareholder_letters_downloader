@@ -17,6 +17,14 @@ def load_archive_scraper_getter():
 
     for module_name in module_names:
         try:
+            module_spec = importlib.util.find_spec(module_name)
+        except ModuleNotFoundError:
+            module_spec = None
+
+        if module_spec is None:
+            continue
+
+        try:
             module = importlib.import_module(module_name)
         except ModuleNotFoundError as exc:
             missing_name = getattr(exc, "name", None)
@@ -26,6 +34,7 @@ def load_archive_scraper_getter():
             raise
 
         return getattr(module, "get_archive_scraper", None)
+
     return None
 
 
