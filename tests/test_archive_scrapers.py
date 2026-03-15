@@ -67,6 +67,27 @@ class ArchiveScrapersTests(unittest.TestCase):
         self.assertEqual(mock_get.call_count, 4)
         self.assertEqual(mock_sleep.call_count, 3)
 
+
+    @unittest.skipIf(archive_scrapers.requests is None, "requests is not installed")
+    @mock.patch("scripts.archive_scrapers.requests.get")
+    def test_extract_pdf_rows_uses_data_href_links_for_archive_pages(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            text='''
+                <html>
+                    <body>
+                        <a data-href="/files/2024-shareholder-letter.pdf">2024 Shareholder Letter</a>
+                    </body>
+                </html>
+            '''
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        rows = archive_scrapers.scrape_amazon_letters()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["year"], "2024")
+        self.assertIn("shareholder-letter.pdf", rows[0]["url"])
+
     def test_get_archive_scraper_returns_known_scraper(self):
         scraper = archive_scrapers.get_archive_scraper("amazon")
         self.assertIs(scraper, archive_scrapers.scrape_amazon_letters)

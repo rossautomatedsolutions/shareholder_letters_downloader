@@ -1,6 +1,6 @@
 import re
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 from urllib.parse import urljoin, urlparse
 
 try:
@@ -104,6 +104,15 @@ def _is_archive_letter_candidate(url: str, text: str) -> bool:
     )
 
 
+def _iter_link_targets(link) -> Iterable[str]:
+    for attribute in ("href", "data-href", "data-url", "data-link"):
+        value = link.get(attribute, "")
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                yield cleaned
+
+
 def _extract_pdf_rows(company_id: str, company_name: str, archive_url: str) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
@@ -118,33 +127,30 @@ def _extract_pdf_rows(company_id: str, company_name: str, archive_url: str) -> L
     rows: List[Dict[str, str]] = []
     seen_urls = set()
 
-    for link in soup.find_all("a", href=True):
-        href = link.get("href", "").strip()
-        if not href:
-            continue
-
-        absolute_url = urljoin(archive_url, href)
+    for link in soup.find_all("a"):
         link_text = " ".join(link.get_text(" ", strip=True).split())
-        if not _is_archive_letter_candidate(absolute_url, link_text):
-            continue
+        for target in _iter_link_targets(link):
+            absolute_url = urljoin(archive_url, target)
+            if not _is_archive_letter_candidate(absolute_url, link_text):
+                continue
 
-        if absolute_url in seen_urls:
-            continue
-        seen_urls.add(absolute_url)
+            if absolute_url in seen_urls:
+                continue
+            seen_urls.add(absolute_url)
 
-        year_match = YEAR_REGEX.search(f"{absolute_url} {link_text}")
-        year = year_match.group(0) if year_match else ""
+            year_match = YEAR_REGEX.search(f"{absolute_url} {link_text}")
+            year = year_match.group(0) if year_match else ""
 
-        rows.append(
-            {
-                "company_id": company_id,
-                "company_name": company_name,
-                "document_type": "shareholder_letter",
-                "year": year,
-                "source_type": "PDF",
-                "url": absolute_url,
-            }
-        )
+            rows.append(
+                {
+                    "company_id": company_id,
+                    "company_name": company_name,
+                    "document_type": "shareholder_letter",
+                    "year": year,
+                    "source_type": "PDF",
+                    "url": absolute_url,
+                }
+            )
 
     return rows
 
@@ -181,11 +187,13 @@ def scrape_blackrock_letters() -> List[Dict[str, str]]:
     )
 
 
+ARCHIVE_SCRAPERS: Dict[str, Callable[[], List[Dict[str, str]]]] = {
+    "berkshire_hathaway": scrape_berkshire_letters,
+    "amazon": scrape_amazon_letters,
+    "jpmorgan_chase": scrape_jpmorgan_letters,
+    "blackrock": scrape_blackrock_letters,
+}
+
+
 def get_archive_scraper(company_id: str) -> Optional[Callable[[], List[Dict[str, str]]]]:
-    scrapers = {
-        "berkshire_hathaway": scrape_berkshire_letters,
-        "amazon": scrape_amazon_letters,
-        "jpmorgan_chase": scrape_jpmorgan_letters,
-        "blackrock": scrape_blackrock_letters,
-    }
-    return scrapers.get(company_id)
+    return ARCHIVE_SCRAPERS.get(company_id)
