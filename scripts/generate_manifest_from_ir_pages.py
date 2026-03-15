@@ -1,4 +1,5 @@
 import re
+import time
 from dataclasses import dataclass
 from typing import Iterable, List, Dict
 from urllib.parse import urljoin
@@ -28,6 +29,12 @@ MANIFEST_COLUMNS = [
 ]
 KEYWORDS = ("letter", "shareholder", "annual-letter", "ceo-letter")
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
+REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+RETRY_DELAYS_SECONDS = (1, 3, 5)
+RETRYABLE_STATUS_CODES = {403, 404, 429}
 
 
 @dataclass(frozen=True)
@@ -74,17 +81,47 @@ def is_candidate_link(url: str, link_text: str) -> bool:
     return any(keyword in lowered_url or keyword in lowered_text for keyword in KEYWORDS)
 
 
+def request_with_retries(url: str, timeout_seconds: int):
+    if requests is None:
+        raise ModuleNotFoundError("requests is required to scan investor relations pages.")
+
+    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
+        try:
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                print(
+                    f"Request to {url} returned HTTP {response.status_code} "
+                    f"(attempt {attempt + 1}/{len(RETRY_DELAYS_SECONDS) + 1})."
+                )
+                if attempt < len(RETRY_DELAYS_SECONDS):
+                    time.sleep(RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                return None
+
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            print(
+                f"Request to {url} failed with connection/request error "
+                f"(attempt {attempt + 1}/{len(RETRY_DELAYS_SECONDS) + 1}): {exc}"
+            )
+            if attempt < len(RETRY_DELAYS_SECONDS):
+                time.sleep(RETRY_DELAYS_SECONDS[attempt])
+                continue
+            return None
+
+    return None
+
+
 def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
             "requests and beautifulsoup4 are required to scan investor relations pages."
         )
     print(f"Scanning company: {company.company_id}")
-    try:
-        response = requests.get(company.investor_relations_page, timeout=timeout_seconds)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        print(f"Failed to fetch {company.investor_relations_page}: {exc}")
+    response = request_with_retries(company.investor_relations_page, timeout_seconds=timeout_seconds)
+    if response is None:
+        print(f"Failed to fetch {company.investor_relations_page} after retries.")
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -148,13 +185,19 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
         raise ModuleNotFoundError(
             "pandas is required to generate the manifest. Install dependencies with `pip install pandas`."
         )
+    companies_list = list(companies)
     rows: List[Dict[str, str]] = []
-    for company in companies:
+    for index, company in enumerate(companies_list):
         rows.extend(fetch_candidates(company))
+        if index < len(companies_list) - 1:
+            time.sleep(2)
 
     deduped_rows = deduplicate_urls(rows)
     frame = pd.DataFrame(deduped_rows, columns=MANIFEST_COLUMNS)
     validate_manifest_schema(frame)
+    print(f"Total companies scanned: {len(companies_list)}")
+    print(f"Total links discovered: {len(rows)}")
+    print(f"Total valid shareholder letters: {len(deduped_rows)}")
     return sort_manifest(frame)
 
 
