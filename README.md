@@ -148,6 +148,31 @@ python scripts/generate_manifest_from_sec.py --tickers AAPL MSFT AMZN JPM --year
 
 This writes `manifests/letters_manifest.sec.csv` with rows in the standard manifest schema (`company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`).
 
+## Manifest cleaning utility
+
+Before ingestion, you can clean and validate the primary manifest:
+
+```bash
+python scripts/validate_and_clean_manifest.py
+```
+
+This command reads `manifests/letters_manifest.csv` and writes:
+
+- Cleaned manifest: `manifests/letters_manifest.cleaned.csv`
+- Rejected rows report: `reports/rejected_manifest_rows.csv`
+
+Validation rules enforced:
+
+- Required columns: `company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`
+- `year` must be numeric
+- `source_type` must be `PDF` or `HTML`
+- `document_type` must be exactly `shareholder_letter`
+- `url` must start with `http`
+- Rows with URLs containing `proxy`, `corporate-data`, `financial-statements`, or `earnings-presentation` are rejected
+- Duplicate rows are removed using `(company_id, year)` (first valid row is kept)
+
+The script prints a summary with rows scanned, accepted, rejected, and duplicate rows removed.
+
 ## Testing
 
 Run:
