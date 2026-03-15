@@ -4,7 +4,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Dict
+from typing import Iterable, List, Dict, Tuple
 from urllib.parse import urljoin, urlparse
 
 
@@ -79,7 +79,7 @@ KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
     re.compile(r"/letters/[^/]*ltr\.pdf$"),
 )
 BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
-YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
+YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -220,14 +220,42 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
-def deduplicate_urls(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
-    seen_urls = set()
+def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict[str, str]], int]:
+    normalized_rows: List[Dict[str, str]] = []
+    skipped_missing_year = 0
+
+    for row in rows:
+        company_id = str(row.get("company_id", "")).strip()
+        company_name = str(row.get("company_name", "")).strip()
+        url = str(row.get("url", "")).strip()
+        year = detect_year(url, str(row.get("link_text", "")).strip() or str(row.get("year", "")).strip())
+
+        if not year:
+            skipped_missing_year += 1
+            continue
+
+        normalized_rows.append(
+            {
+                "company_id": company_id,
+                "company_name": company_name,
+                "document_type": "shareholder_letter",
+                "year": year,
+                "source_type": "PDF",
+                "url": url,
+            }
+        )
+
+    return normalized_rows, skipped_missing_year
+
+
+def deduplicate_company_year(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
+    seen_company_year = set()
     deduped: List[Dict[str, str]] = []
     for row in rows:
-        url = row["url"]
-        if url in seen_urls:
+        key = (row["company_id"], row["year"])
+        if key in seen_company_year:
             continue
-        seen_urls.add(url)
+        seen_company_year.add(key)
         deduped.append(row)
     return deduped
 
@@ -277,12 +305,13 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
         if index < len(companies_list) - 1:
             time.sleep(2)
 
-    deduped_rows = deduplicate_urls(rows)
+    normalized_rows, skipped_missing_year = normalize_and_filter_rows(rows)
+    deduped_rows = deduplicate_company_year(normalized_rows)
     frame = pd.DataFrame(deduped_rows, columns=MANIFEST_COLUMNS)
     validate_manifest_schema(frame)
-    print(f"Total companies scanned: {len(companies_list)}")
-    print(f"Total links discovered: {len(rows)}")
-    print(f"Total valid shareholder letters: {len(deduped_rows)}")
+    print(f"Rows discovered: {len(rows)}")
+    print(f"Rows skipped (missing year): {skipped_missing_year}")
+    print(f"Rows written: {len(deduped_rows)}")
     return sort_manifest(frame)
 
 
