@@ -1,5 +1,4 @@
 import importlib
-import importlib.util
 import re
 import sys
 import time
@@ -18,13 +17,14 @@ def load_archive_scraper_getter():
 
     for module_name in module_names:
         try:
-            spec = importlib.util.find_spec(module_name)
-        except ModuleNotFoundError:
-            continue
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            missing_name = getattr(exc, "name", None)
+            top_level_package = module_name.split(".")[0]
+            if missing_name in (module_name, top_level_package):
+                continue
+            raise
 
-        if spec is None:
-            continue
-        module = importlib.import_module(module_name)
         return getattr(module, "get_archive_scraper", None)
     return None
 
