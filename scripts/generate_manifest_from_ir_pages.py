@@ -248,8 +248,17 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
         archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
+        company_rows: List[Dict[str, str]]
         if archive_scraper is not None:
-            rows.extend(archive_scraper())
+            company_rows = archive_scraper()
+            if company_rows:
+                rows.extend(company_rows)
+            else:
+                print(
+                    f"Archive scraper returned no candidates for {company.company_id}; "
+                    "falling back to IR-page scan."
+                )
+                rows.extend(fetch_candidates(company))
         else:
             rows.extend(fetch_candidates(company))
         if index < len(companies_list) - 1:
