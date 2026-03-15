@@ -7,7 +7,8 @@ from playwright.sync_api import sync_playwright
 OUTPUT_DIR = Path("berkshire_letters_pdf")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-MANIFEST = "berkshire_letters_manifest.csv"
+BASE_DIR = Path(__file__).parent
+MANIFEST = BASE_DIR / "berkshire_letters_manifest.csv"
 
 # -------------------------
 # Helper: download PDF
