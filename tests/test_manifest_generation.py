@@ -11,6 +11,7 @@ from scripts.generate_manifest_from_ir_pages import (
     CompanyDefinition,
     deduplicate_urls,
     fetch_candidates,
+    generate_manifest,
     requests,
     validate_manifest_schema,
 )
@@ -111,6 +112,55 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(mock_get.call_count, 2)
         mock_sleep.assert_called_once_with(1)
+
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    def test_generate_manifest_prefers_archive_scraper(
+        self, mock_get_archive_scraper, mock_fetch_candidates, mock_sleep
+    ):
+        archive_company = CompanyDefinition("amazon", "Amazon", "https://example.com/archive")
+        generic_company = CompanyDefinition("apple", "Apple", "https://example.com/generic")
+
+        archive_rows = [
+            {
+                "company_id": "amazon",
+                "company_name": "Amazon",
+                "document_type": "shareholder_letter",
+                "year": "2024",
+                "source_type": "PDF",
+                "url": "https://example.com/amazon-2024-letter.pdf",
+            }
+        ]
+        generic_rows = [
+            {
+                "company_id": "apple",
+                "company_name": "Apple",
+                "document_type": "shareholder_letter",
+                "year": "2023",
+                "source_type": "PDF",
+                "url": "https://example.com/apple-2023-letter.pdf",
+            }
+        ]
+
+        archive_scraper = mock.Mock(return_value=archive_rows)
+
+        def route(company_id):
+            if company_id == "amazon":
+                return archive_scraper
+            return None
+
+        mock_get_archive_scraper.side_effect = route
+        mock_fetch_candidates.return_value = generic_rows
+
+        frame = generate_manifest([archive_company, generic_company])
+
+        archive_scraper.assert_called_once_with()
+        mock_fetch_candidates.assert_called_once_with(generic_company)
+        self.assertEqual(len(frame), 2)
+        self.assertSetEqual(set(frame["company_id"].tolist()), {"amazon", "apple"})
+        mock_sleep.assert_called_once_with(2)
 
 
 if __name__ == "__main__":

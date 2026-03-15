@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Iterable, List, Dict
 from urllib.parse import urljoin
 
+from scripts.archive_scrapers import get_archive_scraper
+
 try:
     import pandas as pd
 except ModuleNotFoundError:  # pragma: no cover - handled at runtime
@@ -188,7 +190,12 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     companies_list = list(companies)
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
-        rows.extend(fetch_candidates(company))
+        archive_scraper = get_archive_scraper(company.company_id)
+        if archive_scraper is not None:
+            print(f"Using archive scraper for: {company.company_id}")
+            rows.extend(archive_scraper())
+        else:
+            rows.extend(fetch_candidates(company))
         if index < len(companies_list) - 1:
             time.sleep(2)
 
