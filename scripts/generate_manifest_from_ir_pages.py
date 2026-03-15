@@ -94,9 +94,12 @@ KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
 BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
 YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/pdf,application/xhtml+xml",
     "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
 }
+REQUEST_TIMEOUT_SECONDS = 30
 RETRY_DELAYS_SECONDS = (1, 3, 5)
 RETRYABLE_STATUS_CODES = {403, 404, 429}
 
@@ -171,7 +174,7 @@ def request_with_retries(url: str, timeout_seconds: int):
 
     for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
         try:
-            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
             if response.status_code in RETRYABLE_STATUS_CODES:
                 print(
                     f"Request to {url} returned HTTP {response.status_code} "
