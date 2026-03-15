@@ -7,6 +7,7 @@ except ModuleNotFoundError:  # pragma: no cover
     pd = None
 
 from scripts.generate_manifest_from_ir_pages import (
+    BeautifulSoup,
     MANIFEST_COLUMNS,
     CompanyDefinition,
     deduplicate_company_year,
@@ -256,7 +257,10 @@ class ManifestGenerationTests(unittest.TestCase):
             )
         )
 
-    @unittest.skipIf(requests is None, "requests is not installed")
+    @unittest.skipIf(
+        requests is None or BeautifulSoup is None,
+        "requests and beautifulsoup4 are required",
+    )
     @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
     def test_fetch_candidates_uses_browser_headers(self, mock_get):
         mock_get.return_value = mock.Mock(
@@ -283,7 +287,10 @@ class ManifestGenerationTests(unittest.TestCase):
             timeout=30,
         )
 
-    @unittest.skipIf(requests is None, "requests is not installed")
+    @unittest.skipIf(
+        requests is None or BeautifulSoup is None,
+        "requests and beautifulsoup4 are required",
+    )
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
     @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
     def test_fetch_candidates_retries_after_http_403(self, mock_get, mock_sleep):
