@@ -96,6 +96,25 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertEqual(normalized_rows[0]["source_type"], "PDF")
         self.assertEqual(normalized_rows[0]["url"], "https://example.com/acme-2024-letter.pdf")
 
+    def test_normalize_and_filter_rows_falls_back_to_row_year_when_link_text_has_no_year(self):
+        rows = [
+            {
+                "company_id": "acme",
+                "company_name": "Acme",
+                "document_type": "other_type",
+                "year": "2023",
+                "source_type": "doc",
+                "url": "https://example.com/shareholder-letter.pdf",
+                "link_text": "Shareholder Letter",
+            }
+        ]
+
+        normalized_rows, skipped_missing_year = normalize_and_filter_rows(rows)
+
+        self.assertEqual(skipped_missing_year, 0)
+        self.assertEqual(len(normalized_rows), 1)
+        self.assertEqual(normalized_rows[0]["year"], "2023")
+
 
     @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
     def test_load_archive_scraper_getter_falls_back_to_direct_module_for_script_execution(

@@ -230,7 +230,9 @@ def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict
         company_id = str(row.get("company_id", "")).strip()
         company_name = str(row.get("company_name", "")).strip()
         url = str(row.get("url", "")).strip()
-        year = detect_year(url, str(row.get("link_text", "")).strip() or str(row.get("year", "")).strip())
+        link_text = str(row.get("link_text", "")).strip()
+        extracted_year = detect_year(url, link_text)
+        year = extracted_year or detect_year("", str(row.get("year", "")).strip())
 
         if not year:
             skipped_missing_year += 1
