@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 from typing import Dict
 from urllib.parse import urlparse
 
@@ -22,6 +23,11 @@ REQUIRED_COLUMNS = [
 
 ALLOWED_SOURCE_TYPES = {"PDF", "HTML"}
 EXPECTED_DOCUMENT_TYPE = "shareholder_letter"
+ACCEPTED_DOCUMENT_TYPE_ALIASES = {
+    "shareholder_letter",
+    "letter_to_shareholders",
+    "ceo_letter",
+}
 INVALID_URL_SUBSTRINGS = (
     "proxy",
     "corporate-data",
@@ -35,11 +41,21 @@ def _normalize_text(value: str) -> str:
     return str(value).strip()
 
 
-def _row_rejection_reason(row) -> str:
-    year = _normalize_text(row["year"])
-    if not year.isdigit():
-        return "invalid_year"
+def _parse_year(value: str):
+    year_text = _normalize_text(value)
+    try:
+        year = int(year_text)
+    except (TypeError, ValueError):
+        return None
 
+    current_year_plus_one = datetime.now().year + 1
+    if 1900 <= year <= current_year_plus_one:
+        return year
+
+    return None
+
+
+def _row_rejection_reason(row) -> str:
     source_type = _normalize_text(row["source_type"])
     if source_type not in ALLOWED_SOURCE_TYPES:
         return "invalid_source_type"
@@ -84,6 +100,22 @@ def validate_and_clean_manifest(
     for column in normalized_frame.columns:
         normalized_frame[column] = normalized_frame[column].map(_normalize_text)
 
+    normalized_frame["source_type"] = normalized_frame["source_type"].str.upper()
+
+    document_type_aliases = {
+        alias: EXPECTED_DOCUMENT_TYPE for alias in ACCEPTED_DOCUMENT_TYPE_ALIASES
+    }
+    normalized_frame["document_type"] = normalized_frame["document_type"].str.lower()
+    normalized_frame["document_type"] = normalized_frame["document_type"].map(
+        document_type_aliases
+    ).fillna(normalized_frame["document_type"])
+
+    normalized_frame["parsed_year"] = normalized_frame["year"].map(_parse_year)
+    invalid_year_rows = normalized_frame[normalized_frame["parsed_year"].isna()].copy()
+    normalized_frame = normalized_frame[normalized_frame["parsed_year"].notna()].copy()
+    normalized_frame["year"] = normalized_frame["parsed_year"].astype(int)
+    normalized_frame = normalized_frame.drop(columns=["parsed_year"])
+
     annotated = normalized_frame.copy()
     annotated["rejection_reason"] = annotated.apply(_row_rejection_reason, axis=1)
 
@@ -109,12 +141,14 @@ def validate_and_clean_manifest(
         "rows_scanned": len(frame),
         "rows_accepted": len(deduped_valid_rows),
         "rows_rejected": len(all_rejected),
+        "rows_skipped_invalid_year": len(invalid_year_rows),
         "duplicate_rows_removed": duplicate_rows_removed,
     }
 
     print(f"Rows scanned: {summary['rows_scanned']}")
     print(f"Rows accepted: {summary['rows_accepted']}")
     print(f"Rows rejected: {summary['rows_rejected']}")
+    print(f"Rows skipped (invalid year): {summary['rows_skipped_invalid_year']}")
     print(f"Duplicate rows removed: {summary['duplicate_rows_removed']}")
 
     return summary
