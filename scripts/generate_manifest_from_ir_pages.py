@@ -1,5 +1,4 @@
 import importlib
-import importlib.util
 import re
 import time
 from dataclasses import dataclass
@@ -11,13 +10,13 @@ def load_archive_scraper_getter():
     module_names = ("scripts.archive_scrapers", "archive_scrapers")
     for module_name in module_names:
         try:
-            module_spec = importlib.util.find_spec(module_name)
-        except ModuleNotFoundError:
-            continue
-
-        if module_spec is None:
-            continue
-        module = importlib.import_module(module_name)
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as error:
+            # Only fall back when the target module (or its top-level package) is missing.
+            missing_names = {module_name, module_name.split(".")[0]}
+            if error.name in missing_names:
+                continue
+            raise
         return getattr(module, "get_archive_scraper", None)
     return None
 
