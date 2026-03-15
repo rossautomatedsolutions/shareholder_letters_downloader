@@ -1,6 +1,7 @@
 import re
+import time
 from typing import Callable, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 try:
     import requests
@@ -14,10 +15,94 @@ except ModuleNotFoundError:  # pragma: no cover - handled at runtime
 
 YEAR_REGEX = re.compile(r"(19|20)\d{2}")
 PDF_REGEX = re.compile(r"\.pdf($|[?#])", re.IGNORECASE)
+ACCEPT_URL_KEYWORDS = (
+    "letter-to-shareholders",
+    "shareholder-letter",
+    "ceo-letter",
+    "chairman-letter",
+    "annual-letter",
+)
+ACCEPT_TEXT_KEYWORDS = ("letter", "ceo letter", "shareholder letter")
+EXCLUDE_URL_KEYWORDS = (
+    "corporate-data",
+    "shareholder-information",
+    "financial-data",
+    "proxy",
+    "presentation",
+    "transcript",
+    "earnings",
+    "line-of-business",
+    "board",
+    "committee",
+    "supplement",
+)
+KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
+    re.compile(r"/letters/[^/]*ltr\.pdf$"),
+)
+BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+
+RETRY_DELAYS_SECONDS = (1, 3, 5)
+RETRYABLE_STATUS_CODES = {403, 404, 429}
+
+
+def is_shareholder_letter_pdf(url: str, text: str) -> bool:
+    lowered_url = url.lower()
+    lowered_text = text.lower()
+
+    if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS) or any(
+        keyword in lowered_text for keyword in EXCLUDE_URL_KEYWORDS
+    ):
+        return False
+
+    parsed_url = urlparse(url)
+    parsed_path = parsed_url.path.lower()
+    parsed_host = parsed_url.netloc.lower()
+
+    if parsed_host in BERKSHIRE_HOSTS and any(
+        pattern.search(parsed_path) for pattern in KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS
+    ):
+        return True
+
+    return any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS) or any(
+        keyword in lowered_text for keyword in ACCEPT_TEXT_KEYWORDS
+    )
+
+
+def request_with_retries(url: str, timeout_seconds: int = 20):
+    if requests is None:
+        raise ModuleNotFoundError("requests is required to scrape archive pages.")
+
+    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
+        try:
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                print(
+                    f"Request to {url} returned HTTP {response.status_code} "
+                    f"(attempt {attempt + 1}/{len(RETRY_DELAYS_SECONDS) + 1})."
+                )
+                if attempt < len(RETRY_DELAYS_SECONDS):
+                    time.sleep(RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                return None
+
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            print(
+                f"Request to {url} failed with connection/request error "
+                f"(attempt {attempt + 1}/{len(RETRY_DELAYS_SECONDS) + 1}): {exc}"
+            )
+            if attempt < len(RETRY_DELAYS_SECONDS):
+                time.sleep(RETRY_DELAYS_SECONDS[attempt])
+                continue
+            return None
+
+    return None
 
 
 def _extract_pdf_rows(company_id: str, company_name: str, archive_url: str) -> List[Dict[str, str]]:
@@ -26,8 +111,10 @@ def _extract_pdf_rows(company_id: str, company_name: str, archive_url: str) -> L
             "requests and beautifulsoup4 are required to scrape archive pages."
         )
 
-    response = requests.get(archive_url, headers=REQUEST_HEADERS, timeout=20)
-    response.raise_for_status()
+    response = request_with_retries(archive_url, timeout_seconds=20)
+    if response is None:
+        print(f"Failed to fetch {archive_url} after retries.")
+        return []
 
     soup = BeautifulSoup(response.text, "html.parser")
     rows: List[Dict[str, str]] = []
@@ -44,9 +131,13 @@ def _extract_pdf_rows(company_id: str, company_name: str, archive_url: str) -> L
 
         if absolute_url in seen_urls:
             continue
-        seen_urls.add(absolute_url)
 
         link_text = " ".join(link.get_text(" ", strip=True).split())
+        if not is_shareholder_letter_pdf(absolute_url, link_text):
+            continue
+
+        seen_urls.add(absolute_url)
+
         year_match = YEAR_REGEX.search(f"{absolute_url} {link_text}")
         year = year_match.group(0) if year_match else ""
 

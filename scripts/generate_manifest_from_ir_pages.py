@@ -1,19 +1,28 @@
 import importlib
 import importlib.util
 import re
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, List, Dict
 from urllib.parse import urljoin, urlparse
 
 
 def load_archive_scraper_getter():
-    module_name = "archive_scrapers" if __package__ in (None, "") else "scripts.archive_scrapers"
-    if importlib.util.find_spec(module_name) is None:
-        return None
+    module_candidates = ["scripts.archive_scrapers", "archive_scrapers"]
+    if __package__ in (None, ""):
+        scripts_dir = Path(__file__).resolve().parent
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
 
-    module = importlib.import_module(module_name)
-    return getattr(module, "get_archive_scraper", None)
+    for module_name in module_candidates:
+        if importlib.util.find_spec(module_name) is None:
+            continue
+        module = importlib.import_module(module_name)
+        return getattr(module, "get_archive_scraper", None)
+
+    return None
 
 
 get_archive_scraper = load_archive_scraper_getter()
