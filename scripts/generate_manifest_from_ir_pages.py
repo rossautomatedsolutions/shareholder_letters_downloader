@@ -67,26 +67,22 @@ MANIFEST_COLUMNS = [
     "source_type",
     "url",
 ]
-ACCEPT_URL_KEYWORDS = (
-    "letter-to-shareholders",
-    "shareholder-letter",
+ACCEPT_SHAREHOLDER_LETTER_KEYWORDS = (
+    "letter",
+    "shareholder",
     "ceo-letter",
+    "letter-to-shareholders",
     "chairman-letter",
-    "annual-letter",
 )
-ACCEPT_TEXT_KEYWORDS = ("letter", "ceo letter", "shareholder letter")
-EXCLUDE_URL_KEYWORDS = (
-    "corporate-data",
-    "shareholder-information",
-    "financial-data",
+REJECT_URL_KEYWORDS = (
+    "annual-report",
+    "10k",
     "proxy",
-    "presentation",
-    "transcript",
+    "proxy-statement",
+    "ballot",
+    "financials",
     "earnings",
-    "line-of-business",
-    "board",
-    "committee",
-    "supplement",
+    "presentation",
 )
 KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
     re.compile(r"/letters/[^/]*ltr\.pdf$"),
@@ -94,11 +90,15 @@ KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
 BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
 YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/pdf,application/xhtml+xml",
     "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
 }
+REQUEST_TIMEOUT_SECONDS = 30
 RETRY_DELAYS_SECONDS = (1, 3, 5)
 RETRYABLE_STATUS_CODES = {403, 404, 429}
+MIN_BERKSHIRE_LETTERS = 40
 
 
 @dataclass(frozen=True)
@@ -146,9 +146,7 @@ def is_candidate_link(url: str, text: str) -> bool:
     if ".pdf" not in parsed_path:
         return False
 
-    if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS) or any(
-        keyword in lowered_text for keyword in EXCLUDE_URL_KEYWORDS
-    ):
+    if any(keyword in lowered_url for keyword in REJECT_URL_KEYWORDS):
         return False
 
     if parsed_host in BERKSHIRE_HOSTS and any(
@@ -156,8 +154,8 @@ def is_candidate_link(url: str, text: str) -> bool:
     ):
         return True
 
-    return any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS) or any(
-        keyword in lowered_text for keyword in ACCEPT_TEXT_KEYWORDS
+    return any(keyword in lowered_url for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
+        keyword in lowered_text for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS
     )
 
 
@@ -171,7 +169,7 @@ def request_with_retries(url: str, timeout_seconds: int):
 
     for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
         try:
-            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
             if response.status_code in RETRYABLE_STATUS_CODES:
                 print(
                     f"Request to {url} returned HTTP {response.status_code} "
@@ -235,7 +233,9 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
-def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
+def scrape_berkshire_letters(
+    timeout_seconds: int = 20, minimum_expected_letters: int = 0
+) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
             "requests and beautifulsoup4 are required to scrape Berkshire letters."
@@ -260,8 +260,8 @@ def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
         if absolute_url in seen_urls:
             continue
         seen_urls.add(absolute_url)
-        year_match = re.search(r"(19|20)\d{2}", absolute_url)
-        year = year_match.group(0) if year_match else ""
+        link_text = " ".join(link.get_text(" ", strip=True).split())
+        year = detect_year(absolute_url, link_text)
         rows.append(
             {
                 "company_id": "berkshire_hathaway",
@@ -273,7 +273,14 @@ def scrape_berkshire_letters(timeout_seconds: int = 20) -> List[Dict[str, str]]:
             }
         )
 
-    return sorted(rows, key=lambda row: (row["year"], row["url"]), reverse=True)
+    sorted_rows = sorted(rows, key=lambda row: (row["year"], row["url"]), reverse=True)
+    if minimum_expected_letters and len(sorted_rows) < minimum_expected_letters:
+        raise RuntimeError(
+            f"Berkshire scraper only found {len(sorted_rows)} PDF letters from {source_url}; "
+            f"expected at least {minimum_expected_letters}."
+        )
+
+    return sorted_rows
 
 
 def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict[str, str]], int]:
@@ -285,6 +292,10 @@ def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict
         company_name = str(row.get("company_name", "")).strip()
         url = str(row.get("url", "")).strip()
         link_text = str(row.get("link_text", "")).strip()
+
+        if not is_valid_shareholder_letter(url, link_text):
+            continue
+
         extracted_year = detect_year(url, link_text)
         year = extracted_year or detect_year("", str(row.get("year", "")).strip())
 
@@ -348,7 +359,7 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     for index, company in enumerate(companies_list):
         company_rows: List[Dict[str, str]] = []
         if company.company_id == "berkshire_hathaway":
-            company_rows = scrape_berkshire_letters()
+            company_rows = scrape_berkshire_letters(minimum_expected_letters=MIN_BERKSHIRE_LETTERS)
             if not company_rows:
                 print("Dedicated Berkshire scraper returned no candidates; falling back.")
 

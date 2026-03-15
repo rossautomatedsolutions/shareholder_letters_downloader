@@ -15,6 +15,14 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 ALLOWED_SOURCE_TYPES = {"HTML", "PDF"}
+
+
+REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/pdf,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+}
 REQUIRED_COLUMNS = {
     "company_id",
     "company_name",
@@ -152,9 +160,9 @@ def preflight_urls(rows: Sequence[Dict[str, str]], timeout_seconds: int) -> None
 
 
 def head_status(url: str, timeout_seconds: int) -> int:
-    req = Request(url, method="HEAD")
+    req = Request(url, headers=REQUEST_HEADERS, method="HEAD")
     try:
-        with urlopen(req, timeout=timeout_seconds) as response:
+        with urlopen(req, timeout=30) as response:
             return response.status
     except HTTPError as exc:
         return exc.code
@@ -197,7 +205,8 @@ def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> No
     ensure_parent(dest)
 
     def _run():
-        with urlopen(url, timeout=timeout_seconds) as response, dest.open("wb") as output:
+        req = Request(url, headers=REQUEST_HEADERS)
+        with urlopen(req, timeout=30) as response, dest.open("wb") as output:
             shutil.copyfileobj(response, output)
 
     with_retry(_run, retries=retries)
@@ -207,7 +216,8 @@ def fetch_text(url: str, dest: Path, timeout_seconds: int, retries: int) -> None
     ensure_parent(dest)
 
     def _run():
-        with urlopen(url, timeout=timeout_seconds) as response:
+        req = Request(url, headers=REQUEST_HEADERS)
+        with urlopen(req, timeout=30) as response:
             dest.write_text(response.read().decode("utf-8", errors="replace"), encoding="utf-8")
 
     with_retry(_run, retries=retries)

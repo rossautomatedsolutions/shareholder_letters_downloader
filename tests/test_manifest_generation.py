@@ -166,6 +166,25 @@ class ManifestGenerationTests(unittest.TestCase):
             ["scripts.archive_scrapers", "archive_scrapers"],
         )
 
+
+    @unittest.skipIf(requests is None, "requests is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
+    def test_scrape_berkshire_letters_enforces_minimum_count(self, mock_get):
+        mock_get.return_value = mock.Mock(
+            status_code=200,
+            text='''
+                <html>
+                    <body>
+                        <a href="/letters/2024ltr.pdf">2024</a>
+                    </body>
+                </html>
+            ''',
+        )
+        mock_get.return_value.raise_for_status.return_value = None
+
+        with self.assertRaises(RuntimeError):
+            scrape_berkshire_letters(minimum_expected_letters=40)
+
     @unittest.skipIf(requests is None, "requests is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
     def test_scrape_berkshire_letters_extracts_all_pdf_links(self, mock_get):
@@ -363,8 +382,10 @@ class ManifestGenerationTests(unittest.TestCase):
         mock_get.assert_called_with(
             "https://example.com/ir",
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+                "Accept": "text/html,application/pdf,application/xhtml+xml",
                 "Accept-Language": "en-US,en;q=0.9",
+                "Connection": "keep-alive",
             },
             timeout=30,
         )
@@ -509,7 +530,7 @@ class ManifestGenerationTests(unittest.TestCase):
         self.assertIn("importlib.util.find_spec", source)
         self.assertIn("for module_name in module_names", source)
         self.assertIn('if company.company_id == "berkshire_hathaway"', source)
-        self.assertIn("company_rows = scrape_berkshire_letters()", source)
+        self.assertIn("company_rows = scrape_berkshire_letters(", source)
 
     @unittest.skipIf(pd is None, "pandas is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
