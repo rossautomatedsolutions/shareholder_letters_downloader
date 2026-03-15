@@ -92,6 +92,14 @@ class ManifestGenerationTests(unittest.TestCase):
             )
         )
 
+    def test_is_candidate_link_rejects_non_berkshire_ltr_pdf_pattern_without_keywords(self):
+        self.assertFalse(
+            is_candidate_link(
+                "https://example.com/letters/2024ltr.pdf",
+                "2024",
+            )
+        )
+
     def test_is_valid_shareholder_letter_accepts_text_keywords(self):
         self.assertTrue(
             is_valid_shareholder_letter(
