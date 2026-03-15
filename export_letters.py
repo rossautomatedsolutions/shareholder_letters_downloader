@@ -47,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--timeout-seconds", type=int, default=60)
     parser.add_argument("--preflight-urls", action="store_true")
+    parser.add_argument("--force-redownload", action="store_true", help="Overwrite existing normalized PDFs.")
     return parser.parse_args()
 
 
@@ -218,22 +219,62 @@ def categorize_error(exc: BaseException) -> str:
     return "rendering_or_unknown"
 
 
-def process_rows(rows, output_root, reports_dir, render_overrides, retries, timeout_seconds) -> Tuple[Path, Path]:
+def process_rows(
+    rows,
+    output_root,
+    reports_dir,
+    render_overrides,
+    retries,
+    timeout_seconds,
+    force_redownload: bool = False,
+) -> Tuple[Path, Path]:
     report_rows = []
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     output_root.mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    from playwright.sync_api import sync_playwright
+    playwright_context = None
+    browser = None
+    page = None
 
-    with sync_playwright() as playwright:
+    def ensure_page():
+        nonlocal playwright_context, browser, page
+        if page is not None:
+            return page
+        from playwright.sync_api import sync_playwright
+
+        playwright_context = sync_playwright()
+        playwright = playwright_context.start()
         browser = playwright.chromium.launch()
         page = browser.new_page()
+        return page
+
+    try:
         for row in rows:
             normalized_path = normalized_pdf_path(output_root, row)
             source_raw_path = raw_path(output_root, row)
             metadata_path = normalized_path.with_suffix(".metadata.json")
+
+            if normalized_path.exists() and not force_redownload:
+                print(f"Skipping existing file: {row['company_id']} {row['year']}")
+                report_rows.append(
+                    {
+                        "company_id": row["company_id"],
+                        "company_name": row["company_name"],
+                        "document_type": row["document_type"],
+                        "year": row["year"],
+                        "source_type": row["source_type"],
+                        "url": row["url"],
+                        "status": "SKIPPED_EXISTING",
+                        "error_category": "",
+                        "error_message": "",
+                        "normalized_path": str(normalized_path),
+                        "raw_path": str(source_raw_path),
+                        "run_id": run_id,
+                    }
+                )
+                continue
 
             status = "success"
             error_category = ""
@@ -246,7 +287,9 @@ def process_rows(rows, output_root, reports_dir, render_overrides, retries, time
                 else:
                     fetch_text(row["url"], source_raw_path, timeout_seconds, retries)
                     render_cfg = render_overrides.get(row["company_id"], RenderConfig())
-                    render_html_to_pdf(page, source_raw_path, normalized_path, timeout_seconds, retries, render_cfg)
+                    render_html_to_pdf(
+                        ensure_page(), source_raw_path, normalized_path, timeout_seconds, retries, render_cfg
+                    )
 
                 metadata = {
                     "company_id": row["company_id"],
@@ -283,7 +326,11 @@ def process_rows(rows, output_root, reports_dir, render_overrides, retries, time
                     "run_id": run_id,
                 }
             )
-        browser.close()
+    finally:
+        if browser is not None:
+            browser.close()
+        if playwright_context is not None:
+            playwright_context.stop()
 
     csv_report = reports_dir / f"run_report_{run_id}.csv"
     json_report = reports_dir / f"run_report_{run_id}.json"
@@ -315,6 +362,7 @@ def main() -> None:
         render_overrides=overrides,
         retries=args.retries,
         timeout_seconds=args.timeout_seconds,
+        force_redownload=args.force_redownload,
     )
     print(f"Run completed. Reports:\n- {csv_report}\n- {json_report}")
 
