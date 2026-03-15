@@ -10,7 +10,12 @@ from urllib.parse import urljoin, urlparse
 def load_archive_scraper_getter():
     module_names = ("scripts.archive_scrapers", "archive_scrapers")
     for module_name in module_names:
-        if importlib.util.find_spec(module_name) is None:
+        try:
+            module_spec = importlib.util.find_spec(module_name)
+        except ModuleNotFoundError:
+            continue
+
+        if module_spec is None:
             continue
         module = importlib.import_module(module_name)
         return getattr(module, "get_archive_scraper", None)
