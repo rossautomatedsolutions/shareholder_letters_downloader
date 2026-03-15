@@ -84,6 +84,12 @@ def detect_year(url: str, link_text: str) -> str:
     return ""
 
 
+def _contains_text_keyword(text: str, keyword: str) -> bool:
+    escaped_keyword = re.escape(keyword)
+    pattern = rf"\b{escaped_keyword}\b"
+    return re.search(pattern, text) is not None
+
+
 def is_valid_shareholder_letter(url: str, text: str) -> bool:
     lowered_url = url.lower()
     lowered_text = text.lower()
@@ -93,7 +99,7 @@ def is_valid_shareholder_letter(url: str, text: str) -> bool:
     if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS):
         return False
     url_matches = any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS)
-    text_matches = any(keyword in lowered_text for keyword in ACCEPT_TEXT_KEYWORDS)
+    text_matches = any(_contains_text_keyword(lowered_text, keyword) for keyword in ACCEPT_TEXT_KEYWORDS)
     return url_matches or text_matches
 
 

@@ -41,7 +41,21 @@ class ShareholderLetterFilteringTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertFalse(is_valid_shareholder_letter(url, "Shareholder Letter"))
 
+    def test_exclude_keywords_take_priority_over_text_matches(self):
+        self.assertFalse(
+            is_valid_shareholder_letter(
+                "https://example.com/docs/2024-proxy-materials.pdf",
+                "Shareholder Letter",
+            )
+        )
 
+    def test_rejects_newsletter_text_false_positive(self):
+        self.assertFalse(
+            is_valid_shareholder_letter(
+                "https://example.com/docs/company-newsletter-2024.pdf",
+                "Company Newsletter",
+            )
+        )
 
 @unittest.skipIf(pd is None, "pandas is not installed")
 class ManifestGenerationTests(unittest.TestCase):
