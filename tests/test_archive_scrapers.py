@@ -29,6 +29,23 @@ class ArchiveScrapersTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_type"], "PDF")
         self.assertEqual(rows[1]["year"], "2023")
 
+
+    def test_archive_candidate_filter_rejects_excluded_keyword_even_with_letter_text(self):
+        self.assertFalse(
+            archive_scrapers._is_archive_letter_candidate(
+                "https://example.com/files/2024-letter-proxy.pdf",
+                "2024 Shareholder Letter",
+            )
+        )
+
+    def test_archive_candidate_filter_accepts_keyword_pdf(self):
+        self.assertTrue(
+            archive_scrapers._is_archive_letter_candidate(
+                "https://example.com/files/2024-shareholder-letter.pdf",
+                "Download",
+            )
+        )
+
     def test_get_archive_scraper_returns_known_scraper(self):
         scraper = archive_scrapers.get_archive_scraper("amazon")
         self.assertIs(scraper, archive_scrapers.scrape_amazon_letters)

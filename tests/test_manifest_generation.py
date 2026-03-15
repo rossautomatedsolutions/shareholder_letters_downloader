@@ -241,6 +241,35 @@ class ManifestGenerationTests(unittest.TestCase):
         mock_fetch_candidates.assert_not_called()
         mock_sleep.assert_not_called()
 
+
+    @unittest.skipIf(pd is None, "pandas is not installed")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
+    @mock.patch("scripts.generate_manifest_from_ir_pages.get_archive_scraper")
+    def test_generate_manifest_falls_back_when_archive_scraper_returns_no_rows(
+        self, mock_get_archive_scraper, mock_fetch_candidates, mock_sleep
+    ):
+        company = CompanyDefinition("amazon", "Amazon", "https://example.com")
+        mock_get_archive_scraper.return_value = mock.Mock(return_value=[])
+        generic_rows = [
+            {
+                "company_id": "amazon",
+                "company_name": "Amazon",
+                "document_type": "shareholder_letter",
+                "year": "2024",
+                "source_type": "PDF",
+                "url": "https://example.com/2024-shareholder-letter.pdf",
+            }
+        ]
+        mock_fetch_candidates.return_value = generic_rows
+
+        frame = generate_manifest([company])
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.iloc[0]["url"], "https://example.com/2024-shareholder-letter.pdf")
+        mock_fetch_candidates.assert_called_once_with(company)
+        mock_sleep.assert_not_called()
+
     @unittest.skipIf(pd is None, "pandas is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.time.sleep")
     @mock.patch("scripts.generate_manifest_from_ir_pages.fetch_candidates")
