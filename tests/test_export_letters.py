@@ -3,7 +3,13 @@ import json
 import tempfile
 from unittest.mock import patch
 
-from export_letters import ManifestValidationError, normalized_pdf_path, process_rows, validate_manifest
+from export_letters import (
+    ManifestValidationError,
+    filter_rows,
+    normalized_pdf_path,
+    process_rows,
+    validate_manifest,
+)
 from pathlib import Path
 
 
@@ -17,6 +23,14 @@ class ExportLettersTests(unittest.TestCase):
             "source_type": "PDF",
             "url": "https://example.com/2023.pdf",
         }
+        self.base_row_2022 = dict(self.base_row, year="2022", url="https://example.com/2022.pdf")
+        self.other_company_row = dict(
+            self.base_row,
+            company_id="other_inc",
+            company_name="Other Inc",
+            year="2021",
+            url="https://example.com/2021.pdf",
+        )
 
     def test_validate_manifest_accepts_valid_rows(self):
         validate_manifest([self.base_row])
@@ -86,6 +100,35 @@ class ExportLettersTests(unittest.TestCase):
             self.assertEqual(normalized_path.read_bytes(), b"new-content")
             rows = json.loads(json_report.read_text(encoding="utf-8"))
             self.assertEqual(rows[0]["status"], "success")
+
+    def test_filter_rows_by_company(self):
+        rows = [self.base_row, self.other_company_row]
+        filtered = filter_rows(rows, company="acme_inc")
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["company_id"], "acme_inc")
+
+    def test_filter_rows_by_exact_year(self):
+        rows = [self.base_row_2022, self.base_row]
+        filtered = filter_rows(rows, year=2023)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["year"], "2023")
+
+    def test_filter_rows_by_year_range(self):
+        rows = [self.other_company_row, self.base_row_2022, self.base_row]
+        filtered = filter_rows(rows, year_start=2022, year_end=2023)
+        self.assertEqual([row["year"] for row in filtered], ["2022", "2023"])
+
+    def test_filter_rows_rejects_invalid_year_filter_combinations(self):
+        with self.assertRaises(ManifestValidationError):
+            filter_rows([self.base_row], year=2023, year_start=2022)
+
+    def test_filter_rows_rejects_inverted_year_range(self):
+        with self.assertRaises(ManifestValidationError):
+            filter_rows([self.base_row], year_start=2024, year_end=2023)
+
+    def test_filter_rows_rejects_empty_results(self):
+        with self.assertRaises(ManifestValidationError):
+            filter_rows([self.base_row], company="missing")
 
 
 if __name__ == "__main__":
