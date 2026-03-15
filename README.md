@@ -121,6 +121,17 @@ cp manifests/letters_manifest.template.csv manifests/letters_manifest.csv
 python export_letters.py --preflight-urls
 ```
 
+## Automatically Generating a Manifest
+
+You can generate a draft manifest of shareholder-letter PDF candidates from company investor-relations pages:
+
+```bash
+python scripts/generate_manifest_from_ir_pages.py
+```
+
+The script writes results to `manifests/letters_manifest.auto.csv` using the existing manifest schema.
+Review the generated rows, verify that each URL is a valid shareholder letter, and then copy valid rows into `manifests/letters_manifest.csv`.
+
 ## Testing
 
 Run:
