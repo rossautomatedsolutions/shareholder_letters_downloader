@@ -11,6 +11,7 @@ from scripts.generate_manifest_from_ir_pages import (
     CompanyDefinition,
     deduplicate_urls,
     fetch_candidates,
+    is_candidate_link,
     requests,
     validate_manifest_schema,
 )
@@ -58,6 +59,22 @@ class ManifestGenerationTests(unittest.TestCase):
         deduped = deduplicate_urls(rows)
         self.assertEqual(len(deduped), 1)
         self.assertEqual(deduped[0]["url"], "https://example.com/acme-letter.pdf")
+
+    def test_candidate_link_accepts_berkshire_letters_ltr_pattern(self):
+        self.assertTrue(
+            is_candidate_link(
+                "https://www.berkshirehathaway.com/letters/2024ltr.pdf",
+                "2024",
+            )
+        )
+
+    def test_candidate_link_rejects_excluded_pdf_url_patterns(self):
+        self.assertFalse(
+            is_candidate_link(
+                "https://example.com/2024-proxy-statement.pdf",
+                "2024 Annual Materials",
+            )
+        )
 
     @unittest.skipIf(requests is None, "requests is not installed")
     @mock.patch("scripts.generate_manifest_from_ir_pages.requests.get")
