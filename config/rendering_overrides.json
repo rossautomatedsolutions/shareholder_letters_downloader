@@ -1,0 +1,7 @@
+{
+  "berkshire_hathaway": {
+    "wait_until": "networkidle",
+    "viewport_width": 1280,
+    "viewport_height": 720
+  }
+}
