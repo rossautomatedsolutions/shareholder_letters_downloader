@@ -41,6 +41,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download/render shareholder letters from a multi-company manifest.")
     parser.add_argument("--manifest", type=Path, default=Path("manifests/letters_manifest.csv"))
     parser.add_argument("--company", help="Optional company_id filter.")
+    parser.add_argument("--year", type=int, help="Optional year filter (exact match).")
+    parser.add_argument("--year-start", type=int, help="Optional inclusive start year filter.")
+    parser.add_argument("--year-end", type=int, help="Optional inclusive end year filter.")
     parser.add_argument("--output-root", type=Path, default=Path("output"))
     parser.add_argument("--reports-dir", type=Path, default=Path("reports"))
     parser.add_argument("--config", type=Path, default=Path("config/rendering_overrides.json"))
@@ -49,6 +52,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preflight-urls", action="store_true")
     parser.add_argument("--force-redownload", action="store_true", help="Overwrite existing normalized PDFs.")
     return parser.parse_args()
+
+
+def filter_rows(
+    rows: Sequence[Dict[str, str]],
+    company: Optional[str] = None,
+    year: Optional[int] = None,
+    year_start: Optional[int] = None,
+    year_end: Optional[int] = None,
+) -> List[Dict[str, str]]:
+    if year is not None and (year_start is not None or year_end is not None):
+        raise ManifestValidationError("--year cannot be combined with --year-start/--year-end.")
+    if year_start is not None and year_end is not None and year_start > year_end:
+        raise ManifestValidationError("--year-start cannot be greater than --year-end.")
+
+    filtered = list(rows)
+    if company:
+        filtered = [row for row in filtered if row["company_id"] == company]
+
+    if year is not None:
+        year_str = str(year)
+        filtered = [row for row in filtered if row["year"] == year_str]
+    else:
+        if year_start is not None:
+            filtered = [row for row in filtered if int(row["year"]) >= year_start]
+        if year_end is not None:
+            filtered = [row for row in filtered if int(row["year"]) <= year_end]
+
+    if not filtered:
+        raise ManifestValidationError("No rows matched the provided filters.")
+
+    return filtered
 
 
 def load_render_overrides(path: Path) -> Dict[str, RenderConfig]:
@@ -345,11 +379,13 @@ def process_rows(
 def main() -> None:
     args = parse_args()
     rows = load_manifest(args.manifest)
-
-    if args.company:
-        rows = [row for row in rows if row["company_id"] == args.company]
-        if not rows:
-            raise ManifestValidationError(f"No rows found for company_id '{args.company}'.")
+    rows = filter_rows(
+        rows,
+        company=args.company,
+        year=args.year,
+        year_start=args.year_start,
+        year_end=args.year_end,
+    )
 
     if args.preflight_urls:
         preflight_urls(rows, args.timeout_seconds)
