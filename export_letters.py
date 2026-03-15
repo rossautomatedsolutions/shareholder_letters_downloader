@@ -178,14 +178,21 @@ def fetch_text(url: str, dest: Path, timeout_seconds: int, retries: int) -> None
     with_retry(_run, retries=retries)
 
 
-def render_html_to_pdf(page, url: str, output_path: Path, timeout_seconds: int, retries: int, config: RenderConfig) -> None:
+def render_html_to_pdf(
+    page,
+    html_path: Path,
+    output_path: Path,
+    timeout_seconds: int,
+    retries: int,
+    config: RenderConfig,
+) -> None:
     ensure_parent(output_path)
 
     def _run():
         page.set_viewport_size({"width": config.viewport_width, "height": config.viewport_height})
-        if config.user_agent:
-            page.set_extra_http_headers({"User-Agent": config.user_agent})
-        page.goto(url, wait_until=config.wait_until, timeout=timeout_seconds * 1000)
+        page.set_extra_http_headers({"User-Agent": config.user_agent} if config.user_agent else {})
+        html = html_path.read_text(encoding="utf-8")
+        page.set_content(html, wait_until=config.wait_until, timeout=timeout_seconds * 1000)
         page.pdf(path=str(output_path), format="Letter", print_background=True)
 
     with_retry(_run, retries=retries)
@@ -239,7 +246,7 @@ def process_rows(rows, output_root, reports_dir, render_overrides, retries, time
                 else:
                     fetch_text(row["url"], source_raw_path, timeout_seconds, retries)
                     render_cfg = render_overrides.get(row["company_id"], RenderConfig())
-                    render_html_to_pdf(page, row["url"], normalized_path, timeout_seconds, retries, render_cfg)
+                    render_html_to_pdf(page, source_raw_path, normalized_path, timeout_seconds, retries, render_cfg)
 
                 metadata = {
                     "company_id": row["company_id"],
