@@ -26,7 +26,26 @@ MANIFEST_COLUMNS = [
     "source_type",
     "url",
 ]
-KEYWORDS = ("letter", "shareholder", "annual-letter", "ceo-letter")
+ACCEPT_URL_KEYWORDS = (
+    "letter-to-shareholders",
+    "shareholder-letter",
+    "ceo-letter",
+    "chairman-letter",
+    "annual-letter",
+)
+ACCEPT_TEXT_KEYWORDS = ("letter", "ceo letter", "shareholder letter")
+EXCLUDE_URL_KEYWORDS = (
+    "corporate-data",
+    "shareholder-information",
+    "financial-data",
+    "proxy",
+    "presentation",
+    "earnings",
+    "line-of-business",
+    "board",
+    "committee",
+    "supplement",
+)
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 
 
@@ -65,13 +84,17 @@ def detect_year(url: str, link_text: str) -> str:
     return ""
 
 
-def is_candidate_link(url: str, link_text: str) -> bool:
+def is_valid_shareholder_letter(url: str, text: str) -> bool:
     lowered_url = url.lower()
-    lowered_text = link_text.lower()
+    lowered_text = text.lower()
     has_pdf = ".pdf" in lowered_url
     if not has_pdf:
         return False
-    return any(keyword in lowered_url or keyword in lowered_text for keyword in KEYWORDS)
+    if any(keyword in lowered_url for keyword in EXCLUDE_URL_KEYWORDS):
+        return False
+    url_matches = any(keyword in lowered_url for keyword in ACCEPT_URL_KEYWORDS)
+    text_matches = any(keyword in lowered_text for keyword in ACCEPT_TEXT_KEYWORDS)
+    return url_matches or text_matches
 
 
 def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> List[Dict[str, str]]:
@@ -95,9 +118,10 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
             continue
         absolute_url = urljoin(company.investor_relations_page, href)
         link_text = " ".join(link.get_text(" ", strip=True).split())
-        if not is_candidate_link(absolute_url, link_text):
+        if not is_valid_shareholder_letter(absolute_url, link_text):
+            print(f"Rejected document: {absolute_url}")
             continue
-        print(f"Found candidate: {absolute_url}")
+        print(f"Accepted letter: {absolute_url}")
         rows.append(
             {
                 "company_id": company.company_id,
