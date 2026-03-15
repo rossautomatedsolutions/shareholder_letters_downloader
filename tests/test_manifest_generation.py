@@ -9,7 +9,8 @@ except ModuleNotFoundError:  # pragma: no cover
 from scripts.generate_manifest_from_ir_pages import (
     MANIFEST_COLUMNS,
     CompanyDefinition,
-    deduplicate_urls,
+    deduplicate_company_year,
+    normalize_and_filter_rows,
     fetch_candidates,
     generate_manifest,
     is_candidate_link,
@@ -39,7 +40,7 @@ class ManifestGenerationTests(unittest.TestCase):
 
         validate_manifest_schema(frame)
 
-    def test_duplicate_urls_are_removed(self):
+    def test_duplicate_company_year_rows_are_removed(self):
         rows = [
             {
                 "company_id": "acme",
@@ -53,52 +54,88 @@ class ManifestGenerationTests(unittest.TestCase):
                 "company_id": "acme",
                 "company_name": "Acme",
                 "document_type": "shareholder_letter",
-                "year": "2023",
+                "year": "2024",
                 "source_type": "PDF",
-                "url": "https://example.com/acme-letter.pdf",
+                "url": "https://example.com/acme-letter-v2.pdf",
             },
         ]
 
-        deduped = deduplicate_urls(rows)
+        deduped = deduplicate_company_year(rows)
         self.assertEqual(len(deduped), 1)
         self.assertEqual(deduped[0]["url"], "https://example.com/acme-letter.pdf")
 
+    def test_normalize_and_filter_rows_skips_missing_year_and_normalizes_schema(self):
+        rows = [
+            {
+                "company_id": "acme",
+                "company_name": "Acme",
+                "document_type": "other_type",
+                "year": "",
+                "source_type": "doc",
+                "url": "https://example.com/acme-letter.pdf",
+                "link_text": "Shareholder Letter",
+            },
+            {
+                "company_id": "acme",
+                "company_name": "Acme",
+                "document_type": "other_type",
+                "year": "abc",
+                "source_type": "doc",
+                "url": "https://example.com/acme-2024-letter.pdf",
+            },
+        ]
+
+        normalized_rows, skipped_missing_year = normalize_and_filter_rows(rows)
+
+        self.assertEqual(skipped_missing_year, 1)
+        self.assertEqual(len(normalized_rows), 1)
+        self.assertEqual(normalized_rows[0]["company_id"], "acme")
+        self.assertEqual(normalized_rows[0]["company_name"], "Acme")
+        self.assertEqual(normalized_rows[0]["document_type"], "shareholder_letter")
+        self.assertEqual(normalized_rows[0]["year"], "2024")
+        self.assertEqual(normalized_rows[0]["source_type"], "PDF")
+        self.assertEqual(normalized_rows[0]["url"], "https://example.com/acme-2024-letter.pdf")
+
 
     @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
-    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.util.find_spec")
     def test_load_archive_scraper_getter_falls_back_to_direct_module_for_script_execution(
-        self, mock_find_spec, mock_import_module
+        self, mock_import_module
     ):
-        mock_find_spec.side_effect = [None, object()]
         sentinel_getter = mock.Mock()
-        mock_import_module.return_value = mock.Mock(get_archive_scraper=sentinel_getter)
+        missing_scripts_package = ModuleNotFoundError("No module named 'scripts'")
+        missing_scripts_package.name = "scripts"
+        mock_import_module.side_effect = [
+            missing_scripts_package,
+            mock.Mock(get_archive_scraper=sentinel_getter),
+        ]
 
         getter = load_archive_scraper_getter()
 
         self.assertIs(getter, sentinel_getter)
         self.assertEqual(
-            [call.args[0] for call in mock_find_spec.call_args_list],
+            [call.args[0] for call in mock_import_module.call_args_list],
             ["scripts.archive_scrapers", "archive_scrapers"],
         )
-        mock_import_module.assert_called_once_with("archive_scrapers")
 
     @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.import_module")
-    @mock.patch("scripts.generate_manifest_from_ir_pages.importlib.util.find_spec")
     def test_load_archive_scraper_getter_handles_missing_parent_package(
-        self, mock_find_spec, mock_import_module
+        self, mock_import_module
     ):
-        mock_find_spec.side_effect = [ModuleNotFoundError("No module named 'scripts'"), object()]
         sentinel_getter = mock.Mock()
-        mock_import_module.return_value = mock.Mock(get_archive_scraper=sentinel_getter)
+        missing_scripts_package = ModuleNotFoundError("No module named 'scripts'")
+        missing_scripts_package.name = "scripts"
+        mock_import_module.side_effect = [
+            missing_scripts_package,
+            mock.Mock(get_archive_scraper=sentinel_getter),
+        ]
 
         getter = load_archive_scraper_getter()
 
         self.assertIs(getter, sentinel_getter)
         self.assertEqual(
-            [call.args[0] for call in mock_find_spec.call_args_list],
+            [call.args[0] for call in mock_import_module.call_args_list],
             ["scripts.archive_scrapers", "archive_scrapers"],
         )
-        mock_import_module.assert_called_once_with("archive_scrapers")
 
     def test_is_valid_shareholder_letter_accepts_url_keywords(self):
         self.assertTrue(
