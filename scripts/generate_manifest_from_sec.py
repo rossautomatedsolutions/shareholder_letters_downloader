@@ -25,7 +25,13 @@ SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik}.json"
 FILING_INDEX_URL_TEMPLATE = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/index.json"
 ARCHIVES_BASE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{filename}"
 KEYWORDS = ("letter", "shareholder", "chairman")
-USER_AGENT = "shareholder-letters-downloader/1.0 (contact: ops@example.com)"
+REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/pdf,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+}
+REQUEST_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -50,16 +56,9 @@ class SecClient:
                 "requests is required to query SEC EDGAR. Install it with `pip install requests`."
             )
         self.timeout_seconds = timeout_seconds
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": USER_AGENT,
-                "Accept-Encoding": "gzip, deflate",
-            }
-        )
 
     def get_json(self, url: str) -> Dict:
-        response = self.session.get(url, timeout=self.timeout_seconds)
+        response = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
         return response.json()
 

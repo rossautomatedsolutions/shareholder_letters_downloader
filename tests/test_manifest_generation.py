@@ -363,8 +363,10 @@ class ManifestGenerationTests(unittest.TestCase):
         mock_get.assert_called_with(
             "https://example.com/ir",
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+                "Accept": "text/html,application/pdf,application/xhtml+xml",
                 "Accept-Language": "en-US,en;q=0.9",
+                "Connection": "keep-alive",
             },
             timeout=30,
         )

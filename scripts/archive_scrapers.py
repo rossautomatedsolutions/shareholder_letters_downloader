@@ -47,11 +47,14 @@ EXCLUDE_KEYWORDS = (
     "supplement",
 )
 REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Accept": "text/html,application/pdf,application/xhtml+xml",
     "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
 }
 RETRY_DELAYS_SECONDS = (1, 3, 5)
 RETRYABLE_STATUS_CODES = {403, 404, 429}
+REQUEST_TIMEOUT_SECONDS = 30
 
 
 def _request_with_retries(url: str, timeout_seconds: int):
@@ -60,7 +63,7 @@ def _request_with_retries(url: str, timeout_seconds: int):
 
     for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
         try:
-            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
             if response.status_code in RETRYABLE_STATUS_CODES:
                 if attempt < len(RETRY_DELAYS_SECONDS):
                     time.sleep(RETRY_DELAYS_SECONDS[attempt])
