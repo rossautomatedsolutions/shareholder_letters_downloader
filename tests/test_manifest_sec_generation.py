@@ -3,12 +3,13 @@ from unittest import mock
 
 from scripts.generate_manifest_from_sec import (
     Company,
+    Filing,
+    confidence_score_for_url,
     detect_source_type,
     discover_letter_documents_for_filing,
     generate_rows,
     has_target_phrase,
     select_latest_filings,
-    Filing,
 )
 
 
@@ -25,6 +26,11 @@ class ManifestSecGenerationTests(unittest.TestCase):
         self.assertEqual(detect_source_type("chairman-letter.htm"), "HTML")
         self.assertEqual(detect_source_type("letter-to-shareholders.html"), "HTML")
         self.assertIsNone(detect_source_type("letter-to-shareholders.docx"))
+
+    def test_confidence_score_for_url_rules(self):
+        self.assertEqual(confidence_score_for_url("https://example.com/ceo-letter-2024.pdf"), 1.0)
+        self.assertEqual(confidence_score_for_url("https://example.com/annual-report-2024.pdf"), 0.7)
+        self.assertEqual(confidence_score_for_url("https://example.com/10-k-2024.pdf"), 0.3)
 
     def test_select_latest_filings_returns_most_recent_first(self):
         filings = [
@@ -105,6 +111,7 @@ class ManifestSecGenerationTests(unittest.TestCase):
                     "year": "2024",
                     "source_type": "PDF",
                     "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/ceo-letter-2024.pdf",
+                    "confidence_score": 1.0,
                 }
             ],
         )

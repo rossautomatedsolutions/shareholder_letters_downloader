@@ -67,6 +67,7 @@ MANIFEST_COLUMNS = [
     "year",
     "source_type",
     "url",
+    "confidence_score",
 ]
 ACCEPT_SHAREHOLDER_LETTER_KEYWORDS = (
     "letter",
@@ -76,8 +77,8 @@ ACCEPT_SHAREHOLDER_LETTER_KEYWORDS = (
     "chairman-letter",
 )
 REJECT_URL_KEYWORDS = (
-    "annual-report",
     "10k",
+    "10-k",
     "proxy",
     "proxy-statement",
     "ballot",
@@ -147,9 +148,26 @@ def is_candidate_link(url: str, text: str) -> bool:
     if any(keyword in lowered_url for keyword in REJECT_URL_KEYWORDS):
         return False
 
-    return any(keyword in lowered_url for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
+    if any(keyword in lowered_url for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
         keyword in lowered_text for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS
-    )
+    ):
+        return True
+
+    return "annual" in lowered_url and "10-k" not in lowered_url and "10k" not in lowered_url
+
+
+def confidence_score_for_url(url: str) -> float:
+    lowered_url = url.lower()
+    if any(keyword in lowered_url for keyword in ("letter", "shareholder", "ceo")):
+        return 1.0
+    if "annual" in lowered_url and "10-k" not in lowered_url and "10k" not in lowered_url:
+        return 0.7
+    return 0.3
+
+
+def is_explicitly_allowed_low_confidence(row: Dict[str, str]) -> bool:
+    value = str(row.get("allow_low_confidence", "")).strip().lower()
+    return value in {"1", "true", "yes", "y"}
 
 
 def is_valid_shareholder_letter(url: str, text: str) -> bool:
@@ -221,6 +239,7 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
                 "year": detect_year(absolute_url, link_text),
                 "source_type": "PDF",
                 "url": absolute_url,
+                "confidence_score": confidence_score_for_url(absolute_url),
             }
         )
     return rows
@@ -241,6 +260,7 @@ def generate_berkshire_letters() -> List[Dict[str, str]]:
                 "year": year,
                 "source_type": "PDF",
                 "url": url,
+                "confidence_score": confidence_score_for_url(url),
             }
         )
 
@@ -261,6 +281,10 @@ def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict
         if not is_valid_shareholder_letter(url, link_text):
             continue
 
+        confidence_score = confidence_score_for_url(url)
+        if confidence_score < 0.5 and not is_explicitly_allowed_low_confidence(row):
+            continue
+
         extracted_year = detect_year(url, link_text)
         year = extracted_year or detect_year("", str(row.get("year", "")).strip())
 
@@ -276,6 +300,7 @@ def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict
                 "year": year,
                 "source_type": "PDF",
                 "url": url,
+                "confidence_score": confidence_score,
             }
         )
 
