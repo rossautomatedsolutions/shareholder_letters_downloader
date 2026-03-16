@@ -234,7 +234,7 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
 
 
 def scrape_berkshire_letters(
-    timeout_seconds: int = 20, minimum_expected_letters: int = 0
+    timeout_seconds: int = 20, minimum_expected_letters: int = MIN_BERKSHIRE_LETTERS
 ) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
@@ -255,13 +255,15 @@ def scrape_berkshire_letters(
         if not href:
             continue
         absolute_url = urljoin(source_url, href)
-        if ".pdf" not in urlparse(absolute_url).path.lower():
+        if not urlparse(absolute_url).path.lower().endswith(".pdf"):
             continue
         if absolute_url in seen_urls:
             continue
-        seen_urls.add(absolute_url)
         link_text = " ".join(link.get_text(" ", strip=True).split())
         year = detect_year(absolute_url, link_text)
+        if not year:
+            continue
+        seen_urls.add(absolute_url)
         rows.append(
             {
                 "company_id": "berkshire_hathaway",
@@ -274,6 +276,7 @@ def scrape_berkshire_letters(
         )
 
     sorted_rows = sorted(rows, key=lambda row: (row["year"], row["url"]), reverse=True)
+    print(f"Berkshire letters discovered: {len(sorted_rows)}")
     if minimum_expected_letters and len(sorted_rows) < minimum_expected_letters:
         raise RuntimeError(
             f"Berkshire scraper only found {len(sorted_rows)} PDF letters from {source_url}; "
