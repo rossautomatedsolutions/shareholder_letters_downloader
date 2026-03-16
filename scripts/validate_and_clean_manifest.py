@@ -1,7 +1,6 @@
 from pathlib import Path
 from datetime import datetime
-from typing import Dict
-from urllib.parse import urlparse
+from typing import Dict, List
 
 try:
     import pandas as pd
@@ -22,65 +21,45 @@ REQUIRED_COLUMNS = [
 ]
 
 ALLOWED_SOURCE_TYPES = {"PDF", "HTML"}
-EXPECTED_DOCUMENT_TYPE = "shareholder_letter"
-ACCEPTED_DOCUMENT_TYPE_ALIASES = {
-    "shareholder_letter",
-    "letter_to_shareholders",
-    "ceo_letter",
-}
-INVALID_URL_SUBSTRINGS = (
-    "proxy",
-    "corporate-data",
-    "financial-statements",
-    "earnings-presentation",
-)
 DEDUPLICATION_KEYS = ["company_id", "year"]
-
-
-def _normalize_text(value: str) -> str:
-    return str(value).strip()
-
-
-def _parse_year(value: str):
-    year_text = _normalize_text(value)
-    try:
-        year = int(year_text)
-    except (TypeError, ValueError):
-        return None
-
-    current_year_plus_one = datetime.now().year + 1
-    if 1900 <= year <= current_year_plus_one:
-        return year
-
-    return None
-
-
-def _row_rejection_reason(row) -> str:
-    source_type = _normalize_text(row["source_type"])
-    if source_type not in ALLOWED_SOURCE_TYPES:
-        return "invalid_source_type"
-
-    document_type = _normalize_text(row["document_type"])
-    if document_type != EXPECTED_DOCUMENT_TYPE:
-        return "invalid_document_type"
-
-    url = _normalize_text(row["url"])
-    parsed_url = urlparse(url)
-    if parsed_url.scheme.lower() not in {"http", "https"} or not parsed_url.netloc:
-        return "invalid_url_scheme"
-
-    url = url.lower()
-
-    if any(pattern in url for pattern in INVALID_URL_SUBSTRINGS):
-        return "invalid_url_pattern"
-
-    return ""
 
 
 def _validate_required_columns(frame) -> None:
     missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
     if missing:
         raise ValueError(f"Missing required columns: {', '.join(missing)}")
+
+
+def _normalize_row(row: dict) -> dict:
+    normalized = dict(row)
+    normalized["document_type"] = str(normalized["document_type"]).lower().strip()
+    normalized["source_type"] = str(normalized["source_type"]).upper().strip()
+    normalized["url"] = str(normalized["url"]).strip()
+    normalized["company_id"] = str(normalized["company_id"]).strip()
+    normalized["company_name"] = str(normalized["company_name"]).strip()
+
+    if "letter" in normalized["document_type"]:
+        normalized["document_type"] = "shareholder_letter"
+
+    return normalized
+
+
+def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
+    try:
+        row["year"] = int(row["year"])
+    except Exception:
+        return "invalid_year"
+
+    if row["source_type"] not in ALLOWED_SOURCE_TYPES:
+        return "invalid_source_type"
+
+    if not str(row["url"]).startswith("http"):
+        return "invalid_url"
+
+    if not (1900 <= row["year"] <= current_year_plus_one):
+        return "invalid_year_range"
+
+    return ""
 
 
 def validate_and_clean_manifest(
@@ -96,40 +75,40 @@ def validate_and_clean_manifest(
     frame = pd.read_csv(input_path, dtype=str, keep_default_na=False)
     _validate_required_columns(frame)
 
-    normalized_frame = frame.copy()
-    for column in normalized_frame.columns:
-        normalized_frame[column] = normalized_frame[column].map(_normalize_text)
+    rows_scanned = len(frame)
+    current_year_plus_one = datetime.now().year + 1
 
-    normalized_frame["source_type"] = normalized_frame["source_type"].str.upper()
+    accepted_rows: List[dict] = []
+    rejected_rows: List[dict] = []
 
-    document_type_aliases = {
-        alias: EXPECTED_DOCUMENT_TYPE for alias in ACCEPTED_DOCUMENT_TYPE_ALIASES
-    }
-    normalized_frame["document_type"] = normalized_frame["document_type"].str.lower()
-    normalized_frame["document_type"] = normalized_frame["document_type"].map(
-        document_type_aliases
-    ).fillna(normalized_frame["document_type"])
+    for raw_row in frame.to_dict(orient="records"):
+        row = _normalize_row(raw_row)
+        rejection_reason = _row_rejection_reason(row, current_year_plus_one)
 
-    normalized_frame["parsed_year"] = normalized_frame["year"].map(_parse_year)
-    invalid_year_rows = normalized_frame[normalized_frame["parsed_year"].isna()].copy()
-    normalized_frame = normalized_frame[normalized_frame["parsed_year"].notna()].copy()
-    normalized_frame["year"] = normalized_frame["parsed_year"].astype(int)
-    normalized_frame = normalized_frame.drop(columns=["parsed_year"])
+        if rejection_reason:
+            row["rejection_reason"] = rejection_reason
+            rejected_rows.append(row)
+            continue
 
-    annotated = normalized_frame.copy()
-    annotated["rejection_reason"] = annotated.apply(_row_rejection_reason, axis=1)
+        accepted_rows.append(row)
 
-    valid_rows = annotated[annotated["rejection_reason"] == ""].drop(columns=["rejection_reason"])
-    rejected_rows = annotated[annotated["rejection_reason"] != ""]
+    valid_rows = pd.DataFrame(accepted_rows)
+    rejected_df = pd.DataFrame(rejected_rows)
 
-    deduped_valid_rows = valid_rows.drop_duplicates(subset=DEDUPLICATION_KEYS, keep="first")
+    if valid_rows.empty:
+        deduped_valid_rows = valid_rows
+        duplicate_rows = pd.DataFrame(columns=REQUIRED_COLUMNS + ["rejection_reason"])
+    else:
+        deduped_valid_rows = valid_rows.drop_duplicates(subset=DEDUPLICATION_KEYS, keep="first")
+        duplicate_rows = valid_rows[
+            valid_rows.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
+        ].copy()
+        if not duplicate_rows.empty:
+            duplicate_rows["rejection_reason"] = "duplicate_company_year"
+
     duplicate_rows_removed = len(valid_rows) - len(deduped_valid_rows)
 
-    duplicate_rows = valid_rows[valid_rows.duplicated(subset=DEDUPLICATION_KEYS, keep="first")].copy()
-    if not duplicate_rows.empty:
-        duplicate_rows["rejection_reason"] = "duplicate_company_year"
-
-    all_rejected = pd.concat([rejected_rows, duplicate_rows], ignore_index=True)
+    all_rejected = pd.concat([rejected_df, duplicate_rows], ignore_index=True)
 
     clean_output_path.parent.mkdir(parents=True, exist_ok=True)
     rejected_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,18 +117,16 @@ def validate_and_clean_manifest(
     all_rejected.to_csv(rejected_output_path, index=False)
 
     summary = {
-        "rows_scanned": len(frame),
+        "rows_scanned": rows_scanned,
         "rows_accepted": len(deduped_valid_rows),
         "rows_rejected": len(all_rejected),
-        "rows_skipped_invalid_year": len(invalid_year_rows),
         "duplicate_rows_removed": duplicate_rows_removed,
     }
 
     print(f"Rows scanned: {summary['rows_scanned']}")
     print(f"Rows accepted: {summary['rows_accepted']}")
     print(f"Rows rejected: {summary['rows_rejected']}")
-    print(f"Rows skipped (invalid year): {summary['rows_skipped_invalid_year']}")
-    print(f"Duplicate rows removed: {summary['duplicate_rows_removed']}")
+    print(f"Duplicates removed: {summary['duplicate_rows_removed']}")
 
     return summary
 
