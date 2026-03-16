@@ -19,6 +19,7 @@ MANIFEST_COLUMNS = [
     "year",
     "source_type",
     "url",
+    "confidence_score",
 ]
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik}.json"
@@ -44,6 +45,20 @@ TARGET_PHRASE_ALIASES = (
     "chairman letter",
     "letter from chairman",
 )
+
+
+def confidence_score_for_url(url: str) -> float:
+    lowered_url = url.lower()
+    if any(keyword in lowered_url for keyword in ("letter", "shareholder", "ceo")):
+        return 1.0
+    if "annual" in lowered_url and "10-k" not in lowered_url and "10k" not in lowered_url:
+        return 0.7
+    return 0.3
+
+
+def is_explicitly_allowed_low_confidence(document: Dict[str, str]) -> bool:
+    value = str(document.get("allow_low_confidence", "")).strip().lower()
+    return value in {"1", "true", "yes", "y"}
 
 
 @dataclass(frozen=True)
@@ -251,6 +266,9 @@ def generate_rows(
                 accession_number=filing.accession_number,
             )
             for document in documents:
+                confidence_score = confidence_score_for_url(document["url"])
+                if confidence_score < 0.5 and not is_explicitly_allowed_low_confidence(document):
+                    continue
                 rows.append(
                     {
                         "company_id": normalize_company_id(company.ticker),
@@ -259,6 +277,7 @@ def generate_rows(
                         "year": filing_year,
                         "source_type": document["source_type"],
                         "url": document["url"],
+                        "confidence_score": confidence_score,
                     }
                 )
     return rows

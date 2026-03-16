@@ -18,6 +18,7 @@ REQUIRED_COLUMNS = [
     "year",
     "source_type",
     "url",
+    "confidence_score",
 ]
 
 ALLOWED_SOURCE_TYPES = {"PDF", "HTML"}
@@ -37,6 +38,7 @@ def _normalize_row(row: dict) -> dict:
     normalized["url"] = str(normalized["url"]).strip()
     normalized["company_id"] = str(normalized["company_id"]).strip()
     normalized["company_name"] = str(normalized["company_name"]).strip()
+    normalized["confidence_score"] = str(normalized.get("confidence_score", "")).strip()
 
     if "letter" in normalized["document_type"]:
         normalized["document_type"] = "shareholder_letter"
@@ -58,6 +60,14 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
 
     if not (1900 <= row["year"] <= current_year_plus_one):
         return "invalid_year_range"
+
+    try:
+        confidence_score = float(row["confidence_score"])
+    except Exception:
+        return "invalid_confidence_score"
+
+    if confidence_score < 0.7:
+        return "low_confidence_score"
 
     return ""
 
