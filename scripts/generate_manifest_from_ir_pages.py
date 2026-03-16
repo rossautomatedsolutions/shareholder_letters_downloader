@@ -3,6 +3,7 @@ import importlib.util
 import re
 import sys
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Dict, Tuple
@@ -87,7 +88,6 @@ REJECT_URL_KEYWORDS = (
 KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
     re.compile(r"/letters/[^/]*ltr\.pdf$"),
 )
-BERKSHIRE_HOSTS = ("berkshirehathaway.com", "www.berkshirehathaway.com")
 YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -98,7 +98,6 @@ REQUEST_HEADERS = {
 REQUEST_TIMEOUT_SECONDS = 30
 RETRY_DELAYS_SECONDS = (1, 3, 5)
 RETRYABLE_STATUS_CODES = {403, 404, 429}
-MIN_BERKSHIRE_LETTERS = 40
 
 
 @dataclass(frozen=True)
@@ -141,18 +140,12 @@ def is_candidate_link(url: str, text: str) -> bool:
     lowered_text = text.lower()
     parsed_url = urlparse(url)
     parsed_path = parsed_url.path.lower()
-    parsed_host = parsed_url.netloc.lower()
 
     if ".pdf" not in parsed_path:
         return False
 
     if any(keyword in lowered_url for keyword in REJECT_URL_KEYWORDS):
         return False
-
-    if parsed_host in BERKSHIRE_HOSTS and any(
-        pattern.search(parsed_path) for pattern in KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS
-    ):
-        return True
 
     return any(keyword in lowered_url for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
         keyword in lowered_text for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS
@@ -233,59 +226,26 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
-def scrape_berkshire_letters(
-    timeout_seconds: int = 20, minimum_expected_letters: int = MIN_BERKSHIRE_LETTERS
-) -> List[Dict[str, str]]:
-    if requests is None or BeautifulSoup is None:
-        raise ModuleNotFoundError(
-            "requests and beautifulsoup4 are required to scrape Berkshire letters."
-        )
+def generate_berkshire_letters() -> List[Dict[str, str]]:
+    current_year = datetime.now().year
 
-    source_url = "https://www.berkshirehathaway.com/letters/letters.html"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-    }
+    rows = []
+    for year in range(1977, current_year + 1):
+        url = f"https://www.berkshirehathaway.com/letters/{year}ltr.pdf"
 
-    try:
-        response = requests.get(source_url, headers=headers, timeout=timeout_seconds)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        print(f"Failed to fetch Berkshire letters page: {exc}")
-        return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    html = str(soup)
-    href_matches = re.findall(r'href="([^"]+ltr.pdf)"', html, flags=re.IGNORECASE)
-
-    rows_by_company_year: Dict[Tuple[str, str], Dict[str, str]] = {}
-    for href in href_matches:
-        absolute_url = urljoin("https://www.berkshirehathaway.com/", href.strip())
-        year_match = re.search(r"(19|20)\d{2}", absolute_url)
-        year = year_match.group(0) if year_match else ""
-        if not year:
-            continue
-
-        key = ("berkshire_hathaway", year)
-        if key in rows_by_company_year:
-            continue
-
-        rows_by_company_year[key] = {
+        rows.append(
+            {
                 "company_id": "berkshire_hathaway",
                 "company_name": "Berkshire Hathaway",
                 "document_type": "shareholder_letter",
                 "year": year,
                 "source_type": "PDF",
-                "url": absolute_url,
+                "url": url,
             }
+        )
 
-    rows = list(rows_by_company_year.values())
-
-    sorted_rows = sorted(rows, key=lambda row: row["year"], reverse=True)
-    print(f"Berkshire letters discovered: {len(sorted_rows)}")
-    if minimum_expected_letters and len(sorted_rows) < minimum_expected_letters:
-        print("Warning: fewer Berkshire letters found than expected.")
-
-    return sorted_rows
+    print(f"Berkshire letters generated: {len(rows)}")
+    return rows
 
 
 def normalize_and_filter_rows(rows: Iterable[Dict[str, str]]) -> Tuple[List[Dict[str, str]], int]:
@@ -362,13 +322,11 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     companies_list = list(companies)
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
-        company_rows: List[Dict[str, str]] = []
         if company.company_id == "berkshire_hathaway":
-            company_rows = scrape_berkshire_letters(minimum_expected_letters=MIN_BERKSHIRE_LETTERS)
-            if not company_rows:
-                print("Dedicated Berkshire scraper returned no candidates; falling back.")
-
-        if not company_rows:
+            company_rows = generate_berkshire_letters()
+            rows.extend(company_rows)
+        else:
+            company_rows: List[Dict[str, str]] = []
             archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
             if archive_scraper is not None:
                 company_rows = archive_scraper()
@@ -378,10 +336,10 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
                         "falling back to IR-page scan."
                     )
 
-        if company_rows:
-            rows.extend(company_rows)
-        else:
-            rows.extend(fetch_candidates(company))
+            if company_rows:
+                rows.extend(company_rows)
+            else:
+                rows.extend(fetch_candidates(company))
         if index < len(companies_list) - 1:
             time.sleep(2)
 
