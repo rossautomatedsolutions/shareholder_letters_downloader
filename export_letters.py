@@ -215,7 +215,6 @@ def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> No
             shutil.copyfileobj(response, output)
         if not dest.exists():
             raise RuntimeError("Download failed")
-        print(f"Saved PDF: {dest}")
 
     with_retry(_run, retries=retries)
 
@@ -307,6 +306,7 @@ def process_rows(
         return page
 
     downloaded_count = 0
+    raw_saved_count = 0
 
     try:
         for row in rows:
@@ -340,10 +340,14 @@ def process_rows(
             try:
                 if row["source_type"] == "PDF":
                     fetch_binary(row["url"], source_raw_path, timeout_seconds, retries)
+                    print(f"Saved RAW file: {source_raw_path}")
+                    raw_saved_count += 1
                     ensure_parent(normalized_path)
                     shutil.copy2(source_raw_path, normalized_path)
                 else:
                     fetch_text(row["url"], source_raw_path, timeout_seconds, retries)
+                    print(f"Saved RAW file: {source_raw_path}")
+                    raw_saved_count += 1
                     render_cfg = render_overrides.get(row["company_id"], RenderConfig())
                     render_html_to_pdf(
                         ensure_page(), source_raw_path, normalized_path, timeout_seconds, retries, render_cfg
@@ -399,6 +403,7 @@ def process_rows(
         writer.writerows(report_rows)
     json_report.write_text(json.dumps(report_rows, indent=2), encoding="utf-8")
     print(f"Total PDFs downloaded: {downloaded_count}")
+    print(f"Total raw files saved: {raw_saved_count}")
     return csv_report, json_report
 
 
