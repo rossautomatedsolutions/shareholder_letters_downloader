@@ -1,182 +1,163 @@
 import argparse
 import json
+import logging
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Iterable, Optional
 
-SECTION_HEADER_PATTERN = re.compile(r"^[A-Z][A-Z\s,&\-]{2,}$")
-TITLE_CASE_HEADER_PATTERN = re.compile(r"^(?:[A-Z][a-z]+\s){1,6}[A-Z][a-z]+$")
-
-
-def resolve_pdf_backend() -> Tuple[str, object]:
-    """Return the available PDF text extraction backend.
-
-    Prefers PyMuPDF (`fitz`) and falls back to `pdfplumber`.
-    """
-    try:
-        import fitz  # type: ignore
-
-        return "pymupdf", fitz
-    except ModuleNotFoundError:
-        try:
-            import pdfplumber  # type: ignore
-
-            return "pdfplumber", pdfplumber
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "Install PyMuPDF (fitz) or pdfplumber to extract PDF text."
-            ) from exc
+LOGGER = logging.getLogger(__name__)
+WORD_PATTERN = re.compile(r"\b\w+\b")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Extract plain text from downloaded shareholder letters and write "
-            "output_text/<company>/<year>.txt plus metadata sidecars."
+            "Extract text from PDFs stored at output/<company>/<document_type>/<year>.pdf "
+            "and write output_text/<company>/<year>.txt plus output_text/<company>/<year>.json."
         )
     )
-    parser.add_argument("--output-root", type=Path, default=Path("output"))
-    parser.add_argument("--text-output-root", type=Path, default=Path("output_text"))
-    parser.add_argument("--company", help="Optional company_id to process.")
+    parser.add_argument("--input-root", type=Path, default=Path("output"))
+    parser.add_argument("--output-root", type=Path, default=Path("output_text"))
     parser.add_argument("--document-type", default="shareholder_letter")
+    parser.add_argument("--company", help="Optional company_id to process.")
     parser.add_argument(
-        "--skip-existing",
-        action="store_true",
-        help="Skip extraction when <year>.txt already exists.",
+        "--failure-log",
+        type=Path,
+        help="Optional path for the failure log file. Defaults to <output-root>/extract_text_failures.log.",
     )
     return parser.parse_args()
 
 
-def iter_letter_pdfs(
-    output_root: Path, document_type: str, company_id: Optional[str] = None
-) -> Iterable[Path]:
-    if not output_root.exists():
+def configure_logging(output_root: Path, failure_log: Optional[Path] = None) -> Path:
+    output_root.mkdir(parents=True, exist_ok=True)
+    log_path = failure_log or output_root / "extract_text_failures.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.WARNING)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    return log_path
+
+
+def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = None) -> Iterable[Path]:
+    if not input_root.exists():
         return []
 
     if company_id:
-        letter_dir = output_root / company_id / document_type
-        return sorted(letter_dir.glob("*.pdf"))
+        target_dir = input_root / company_id / document_type
+        return sorted(target_dir.glob("*.pdf"))
 
-    pdf_paths: List[Path] = []
-    for company_dir in sorted(path for path in output_root.iterdir() if path.is_dir()):
-        letter_dir = company_dir / document_type
-        if letter_dir.exists():
-            pdf_paths.extend(sorted(letter_dir.glob("*.pdf")))
+    pdf_paths = []
+    for company_dir in sorted(path for path in input_root.iterdir() if path.is_dir()):
+        target_dir = company_dir / document_type
+        if target_dir.exists():
+            pdf_paths.extend(sorted(target_dir.glob("*.pdf")))
     return pdf_paths
 
 
-def extract_text_with_pymupdf(fitz_module: object, pdf_path: Path) -> str:
-    chunks: List[str] = []
-    document = fitz_module.open(str(pdf_path))
+def extract_pdf_text(pdf_path: Path) -> str:
     try:
+        import fitz
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("PyMuPDF (fitz) is required to extract text from PDFs.") from exc
+
+    text_chunks = []
+    with fitz.open(pdf_path) as document:
         for page in document:
-            chunks.append(page.get_text("text") or "")
-    finally:
-        document.close()
-    return "\n".join(chunks)
+            text_chunks.append(page.get_text("text") or "")
+    return "\n".join(text_chunks).strip()
 
 
-def extract_text_with_pdfplumber(pdfplumber_module: object, pdf_path: Path) -> str:
-    chunks: List[str] = []
-    with pdfplumber_module.open(str(pdf_path)) as pdf:
-        for page in pdf.pages:
-            chunks.append(page.extract_text() or "")
-    return "\n".join(chunks)
-
-
-def detect_sections(text: str) -> List[str]:
-    sections: List[str] = []
-    seen = set()
-    for raw_line in text.splitlines():
-        line = " ".join(raw_line.split()).strip()
-        if len(line) < 4 or len(line) > 80:
-            continue
-        if SECTION_HEADER_PATTERN.match(line) or TITLE_CASE_HEADER_PATTERN.match(line):
-            normalized = line.title()
-            if normalized not in seen:
-                sections.append(normalized)
-                seen.add(normalized)
-        if len(sections) >= 25:
-            break
-    return sections
-
-
-def build_metadata(text: str, backend_name: str) -> Dict[str, object]:
-    words = re.findall(r"\b\w+\b", text)
+def build_metadata(company_id: str, year: str, text: str) -> dict:
     return {
-        "word_count": len(words),
-        "detected_sections": detect_sections(text),
-        "extraction_backend": backend_name,
+        "company_id": company_id,
+        "year": year,
+        "word_count": len(WORD_PATTERN.findall(text)),
+        "char_count": len(text),
     }
 
 
-def write_outputs(
-    text_output_root: Path,
-    company_id: str,
-    year: str,
-    text: str,
-    metadata: Dict[str, object],
-) -> Tuple[Path, Path]:
-    company_dir = text_output_root / company_id
-    company_dir.mkdir(parents=True, exist_ok=True)
+def already_processed(output_root: Path, company_id: str, year: str) -> bool:
+    company_output_dir = output_root / company_id
+    return (company_output_dir / f"{year}.txt").exists() and (company_output_dir / f"{year}.json").exists()
 
-    text_path = company_dir / f"{year}.txt"
-    metadata_path = company_dir / f"{year}.metadata.json"
 
-    text_path.write_text(text, encoding="utf-8")
-    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    return text_path, metadata_path
+def write_outputs(output_root: Path, company_id: str, year: str, text: str, metadata: dict) -> None:
+    company_output_dir = output_root / company_id
+    company_output_dir.mkdir(parents=True, exist_ok=True)
+    (company_output_dir / f"{year}.txt").write_text(text, encoding="utf-8")
+    (company_output_dir / f"{year}.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def run(
+    input_root: Path,
     output_root: Path,
-    text_output_root: Path,
     document_type: str,
     company_id: Optional[str] = None,
-    skip_existing: bool = False,
 ) -> int:
-    backend_name, backend_module = resolve_pdf_backend()
-    processed = 0
+    processed_count = 0
+    skipped_count = 0
+    failed_count = 0
 
-    for pdf_path in iter_letter_pdfs(
-        output_root=output_root,
-        document_type=document_type,
-        company_id=company_id,
-    ):
-        company = pdf_path.parent.parent.name
+    for pdf_path in iter_pdfs(input_root=input_root, document_type=document_type, company_id=company_id):
+        resolved_company_id = pdf_path.parent.parent.name
         year = pdf_path.stem
-        target_text_path = text_output_root / company / f"{year}.txt"
-        if skip_existing and target_text_path.exists():
+
+        if already_processed(output_root=output_root, company_id=resolved_company_id, year=year):
+            skipped_count += 1
+            LOGGER.info("Skipping already processed file: %s", pdf_path)
             continue
 
-        if backend_name == "pymupdf":
-            text = extract_text_with_pymupdf(backend_module, pdf_path)
-        else:
-            text = extract_text_with_pdfplumber(backend_module, pdf_path)
+        try:
+            text = extract_pdf_text(pdf_path)
+            metadata = build_metadata(company_id=resolved_company_id, year=year, text=text)
+            write_outputs(
+                output_root=output_root,
+                company_id=resolved_company_id,
+                year=year,
+                text=text,
+                metadata=metadata,
+            )
+            processed_count += 1
+            LOGGER.info("Processed %s", pdf_path)
+        except Exception as exc:  # noqa: BLE001
+            failed_count += 1
+            LOGGER.exception("Failed to process %s: %s", pdf_path, exc)
 
-        metadata = build_metadata(text=text, backend_name=backend_name)
-        write_outputs(
-            text_output_root=text_output_root,
-            company_id=company,
-            year=year,
-            text=text,
-            metadata=metadata,
-        )
-        processed += 1
-
-    return processed
+    LOGGER.info(
+        "Finished text extraction. processed=%s skipped=%s failed=%s",
+        processed_count,
+        skipped_count,
+        failed_count,
+    )
+    return processed_count
 
 
 def main() -> None:
     args = parse_args()
-    processed = run(
+    log_path = configure_logging(output_root=args.output_root, failure_log=args.failure_log)
+    LOGGER.info("Failure log path: %s", log_path)
+    run(
+        input_root=args.input_root,
         output_root=args.output_root,
-        text_output_root=args.text_output_root,
         document_type=args.document_type,
         company_id=args.company,
-        skip_existing=args.skip_existing,
     )
-    print(f"Extracted text for {processed} PDF(s).")
 
 
 if __name__ == "__main__":
