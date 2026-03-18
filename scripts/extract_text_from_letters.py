@@ -52,14 +52,17 @@ def configure_logging(output_root: Path, failure_log: Optional[Path] = None) -> 
 
 
 def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = None) -> Iterable[Path]:
-    if not input_root.exists():
-        return []
-
-    pdf_files = sorted(input_root.rglob("*.pdf"))
-    print(f"Found {len(pdf_files)} PDF files")
+    pdf_files = list(
+        set(
+            list(input_root.rglob("*.pdf"))
+            + list((input_root / "raw").rglob("*.pdf"))
+        )
+    )
+    pdf_files = sorted(pdf_files)
+    print(f"Found {len(pdf_files)} PDF files (including raw)")
 
     if not pdf_files:
-        print("No PDFs found under output/. Check downloader output.")
+        print("No PDFs found under output/ or output/raw. Check downloader output.")
         return []
 
     if company_id is None:
@@ -68,19 +71,29 @@ def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = 
     return [pdf_path for pdf_path in pdf_files if company_id in pdf_path.parts]
 
 
-def resolve_pdf_metadata(pdf_path: Path, input_root: Path) -> tuple[str, str]:
+def resolve_pdf_metadata(pdf_path: Path, input_root: Path) -> tuple[str, Optional[str], str]:
     year = pdf_path.stem
     company_id = pdf_path.parent.name
+    document_type = None
+
+    raw_parts = pdf_path.parts
+    if "raw" in raw_parts:
+        raw_index = raw_parts.index("raw")
+        trailing_parts = raw_parts[raw_index + 1 :]
+        if len(trailing_parts) >= 3:
+            company_id = trailing_parts[0]
+            document_type = trailing_parts[1]
+            return company_id, document_type, year
 
     try:
         relative_parts = pdf_path.relative_to(input_root).parts
     except ValueError:
         relative_parts = pdf_path.parts
 
-    if len(relative_parts) >= 3:
-        company_id = relative_parts[0]
+    if len(relative_parts) >= 2:
+        company_id = relative_parts[-2]
 
-    return company_id, year
+    return company_id, document_type, year
 
 
 def extract_pdf_text(pdf_path: Path) -> str:
@@ -96,13 +109,16 @@ def extract_pdf_text(pdf_path: Path) -> str:
     return "\n".join(text_chunks).strip()
 
 
-def build_metadata(company_id: str, year: str, text: str) -> dict:
-    return {
+def build_metadata(company_id: str, year: str, text: str, document_type: Optional[str] = None) -> dict:
+    metadata = {
         "company_id": company_id,
         "year": year,
         "word_count": len(WORD_PATTERN.findall(text)),
         "char_count": len(text),
     }
+    if document_type is not None:
+        metadata["document_type"] = document_type
+    return metadata
 
 
 def already_processed(output_root: Path, company_id: str, year: str) -> bool:
@@ -131,7 +147,10 @@ def run(
     failed_count = 0
 
     for pdf_path in iter_pdfs(input_root=input_root, document_type=document_type, company_id=company_id):
-        resolved_company_id, year = resolve_pdf_metadata(pdf_path=pdf_path, input_root=input_root)
+        resolved_company_id, resolved_document_type, year = resolve_pdf_metadata(
+            pdf_path=pdf_path,
+            input_root=input_root,
+        )
 
         if already_processed(output_root=output_root, company_id=resolved_company_id, year=year):
             skipped_count += 1
@@ -140,7 +159,12 @@ def run(
 
         try:
             text = extract_pdf_text(pdf_path)
-            metadata = build_metadata(company_id=resolved_company_id, year=year, text=text)
+            metadata = build_metadata(
+                company_id=resolved_company_id,
+                year=year,
+                text=text,
+                document_type=resolved_document_type or document_type,
+            )
             write_outputs(
                 output_root=output_root,
                 company_id=resolved_company_id,
