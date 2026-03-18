@@ -211,27 +211,32 @@ def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> bo
     dest = dest.with_suffix(".pdf")
 
     def _run() -> bool:
-        response = requests.get(url, headers=REQUEST_HEADERS, timeout=30)
+        try:
+            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
+            print(f"Status: {response.status_code}")
 
-        if response.status_code != 200:
-            print(f"Failed download: {url} ({response.status_code})")
-            return False
+            if response.status_code != 200:
+                print(f"Skipping: bad status ({response.status_code})")
+                return False
 
-        content_type = response.headers.get("Content-Type", "")
-        if "pdf" not in content_type.lower():
-            print(f"Skipping non-PDF content: {url} ({content_type})")
-            return False
+            content_type = response.headers.get("Content-Type", "")
+            if "pdf" not in content_type.lower():
+                print(f"Skipping: not PDF ({content_type})")
+                return False
 
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(response.content)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(response.content)
 
-        if not dest.exists() or dest.stat().st_size == 0:
-            print(f"Write failed: {dest}")
-            return False
+            if not dest.exists() or dest.stat().st_size == 0:
+                print(f"Write failed: {dest}")
+                return False
 
-        print(f"Saved PDF: {dest}")
-        return True
+            print(f"Saved PDF: {dest}")
+            return True
+        except Exception as exc:
+            print(f"Skipping: exception ({exc})")
+            raise
 
     return with_retry(_run, retries=retries)
 
@@ -327,6 +332,7 @@ def process_rows(
 
     try:
         for row in rows:
+            print(f"Processing: {row['company_id']} {row['year']} {row['url']}")
             normalized_path = normalized_pdf_path(output_root, row)
             source_raw_path = raw_path(output_root, row)
             metadata_path = normalized_path.with_suffix(".metadata.json")
