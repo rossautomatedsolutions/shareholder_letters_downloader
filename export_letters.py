@@ -193,21 +193,29 @@ def compute_sha256(path: Path) -> str:
 
 
 def normalized_pdf_path(output_root: Path, row: Dict[str, str]) -> Path:
-    return output_root / row["company_id"] / row["document_type"] / f"{row['year']}.pdf"
+    output_path = output_root / row["company_id"] / row["document_type"] / f"{row['year']}.pdf"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path.with_suffix(".pdf")
 
 
 def raw_path(output_root: Path, row: Dict[str, str]) -> Path:
     ext = ".pdf" if row["source_type"] == "PDF" else ".html"
-    return output_root / "raw" / row["company_id"] / row["document_type"] / f"{row['year']}{ext}"
+    output_path = output_root / "raw" / row["company_id"] / row["document_type"] / f"{row['year']}{ext}"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path.with_suffix(".pdf") if row["source_type"] == "PDF" else output_path
 
 
 def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> None:
-    ensure_parent(dest)
+    dest = dest.with_suffix(".pdf")
+    dest.parent.mkdir(parents=True, exist_ok=True)
 
     def _run():
         req = Request(url, headers=REQUEST_HEADERS)
         with urlopen(req, timeout=30) as response, dest.open("wb") as output:
             shutil.copyfileobj(response, output)
+        if not dest.exists():
+            raise RuntimeError("Download failed")
+        print(f"Saved PDF: {dest}")
 
     with_retry(_run, retries=retries)
 
@@ -231,7 +239,8 @@ def render_html_to_pdf(
     retries: int,
     config: RenderConfig,
 ) -> None:
-    ensure_parent(output_path)
+    output_path = output_path.with_suffix(".pdf")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _run():
         page.set_viewport_size({"width": config.viewport_width, "height": config.viewport_height})
@@ -239,6 +248,9 @@ def render_html_to_pdf(
         html = html_path.read_text(encoding="utf-8")
         page.set_content(html, wait_until=config.wait_until, timeout=timeout_seconds * 1000)
         page.pdf(path=str(output_path), format="Letter", print_background=True)
+        if not output_path.exists():
+            raise RuntimeError("Download failed")
+        print(f"Saved PDF: {output_path}")
 
     with_retry(_run, retries=retries)
 
@@ -294,6 +306,8 @@ def process_rows(
         page = browser.new_page()
         return page
 
+    downloaded_count = 0
+
     try:
         for row in rows:
             normalized_path = normalized_pdf_path(output_root, row)
@@ -335,6 +349,7 @@ def process_rows(
                         ensure_page(), source_raw_path, normalized_path, timeout_seconds, retries, render_cfg
                     )
 
+                downloaded_count += 1
                 metadata = {
                     "company_id": row["company_id"],
                     "company_name": row["company_name"],
@@ -383,6 +398,7 @@ def process_rows(
         writer.writeheader()
         writer.writerows(report_rows)
     json_report.write_text(json.dumps(report_rows, indent=2), encoding="utf-8")
+    print(f"Total PDFs downloaded: {downloaded_count}")
     return csv_report, json_report
 
 
