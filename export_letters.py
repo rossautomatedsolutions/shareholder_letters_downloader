@@ -6,6 +6,8 @@ import shutil
 import socket
 import ssl
 import time
+
+import requests
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -205,18 +207,33 @@ def raw_path(output_root: Path, row: Dict[str, str]) -> Path:
     return output_path.with_suffix(".pdf") if row["source_type"] == "PDF" else output_path
 
 
-def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> None:
+def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> bool:
     dest = dest.with_suffix(".pdf")
-    dest.parent.mkdir(parents=True, exist_ok=True)
 
-    def _run():
-        req = Request(url, headers=REQUEST_HEADERS)
-        with urlopen(req, timeout=30) as response, dest.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        if not dest.exists():
-            raise RuntimeError("Download failed")
+    def _run() -> bool:
+        response = requests.get(url, headers=REQUEST_HEADERS, timeout=30)
 
-    with_retry(_run, retries=retries)
+        if response.status_code != 200:
+            print(f"Failed download: {url} ({response.status_code})")
+            return False
+
+        content_type = response.headers.get("Content-Type", "")
+        if "pdf" not in content_type.lower():
+            print(f"Skipping non-PDF content: {url} ({content_type})")
+            return False
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(response.content)
+
+        if not dest.exists() or dest.stat().st_size == 0:
+            print(f"Write failed: {dest}")
+            return False
+
+        print(f"Saved PDF: {dest}")
+        return True
+
+    return with_retry(_run, retries=retries)
 
 
 def fetch_text(url: str, dest: Path, timeout_seconds: int, retries: int) -> None:
@@ -305,7 +322,7 @@ def process_rows(
         page = browser.new_page()
         return page
 
-    downloaded_count = 0
+    success_count = 0
     raw_saved_count = 0
 
     try:
@@ -339,7 +356,28 @@ def process_rows(
             error_message = ""
             try:
                 if row["source_type"] == "PDF":
-                    fetch_binary(row["url"], source_raw_path, timeout_seconds, retries)
+                    if not fetch_binary(row["url"], source_raw_path, timeout_seconds, retries):
+                        status = "failed"
+                        error_category = "download_failed"
+                        error_message = f"PDF download was not saved for {row['url']}"
+                        report_rows.append(
+                            {
+                                "company_id": row["company_id"],
+                                "company_name": row["company_name"],
+                                "document_type": row["document_type"],
+                                "year": row["year"],
+                                "source_type": row["source_type"],
+                                "url": row["url"],
+                                "status": status,
+                                "error_category": error_category,
+                                "error_message": error_message,
+                                "normalized_path": str(normalized_path),
+                                "raw_path": str(source_raw_path),
+                                "run_id": run_id,
+                            }
+                        )
+                        continue
+
                     print(f"Saved RAW file: {source_raw_path}")
                     raw_saved_count += 1
                     ensure_parent(normalized_path)
@@ -353,7 +391,7 @@ def process_rows(
                         ensure_page(), source_raw_path, normalized_path, timeout_seconds, retries, render_cfg
                     )
 
-                downloaded_count += 1
+                success_count += 1
                 metadata = {
                     "company_id": row["company_id"],
                     "company_name": row["company_name"],
@@ -402,7 +440,7 @@ def process_rows(
         writer.writeheader()
         writer.writerows(report_rows)
     json_report.write_text(json.dumps(report_rows, indent=2), encoding="utf-8")
-    print(f"Total PDFs downloaded: {downloaded_count}")
+    print(f"Total PDFs successfully saved: {success_count}")
     print(f"Total raw files saved: {raw_saved_count}")
     return csv_report, json_report
 
