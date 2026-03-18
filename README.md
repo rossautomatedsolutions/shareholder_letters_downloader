@@ -61,6 +61,12 @@ Extract/refresh letter metadata from downloaded PDFs:
 python scripts/extract_letter_metadata.py
 ```
 
+Build keyword features from extracted text files:
+
+```bash
+python scripts/build_keyword_features.py
+```
+
 
 ## Output behavior
 
