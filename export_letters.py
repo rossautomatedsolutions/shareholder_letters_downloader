@@ -19,11 +19,10 @@ from urllib.request import Request, urlopen
 ALLOWED_SOURCE_TYPES = {"HTML", "PDF"}
 
 
-REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-    "Accept": "text/html,application/pdf,application/xhtml+xml",
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept": "application/pdf,application/octet-stream,*/*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Connection": "keep-alive",
 }
 REQUIRED_COLUMNS = {
     "company_id",
@@ -162,7 +161,7 @@ def preflight_urls(rows: Sequence[Dict[str, str]], timeout_seconds: int) -> None
 
 
 def head_status(url: str, timeout_seconds: int) -> int:
-    req = Request(url, headers=REQUEST_HEADERS, method="HEAD")
+    req = Request(url, headers=HEADERS, method="HEAD")
     try:
         with urlopen(req, timeout=30) as response:
             return response.status
@@ -207,36 +206,51 @@ def raw_path(output_root: Path, row: Dict[str, str]) -> Path:
     return output_path.with_suffix(".pdf") if row["source_type"] == "PDF" else output_path
 
 
-def fetch_binary(url: str, dest: Path, timeout_seconds: int, retries: int) -> bool:
-    dest = dest.with_suffix(".pdf")
+def fetch_binary(
+    url: str,
+    company_id: str,
+    year: str,
+    output_root: Path,
+    timeout_seconds: int,
+    retries: int,
+) -> Tuple[bool, Optional[Path], Optional[Path]]:
+    pdf_path = output_root / "raw" / company_id / f"{year}.pdf"
+    debug_path = output_root / "debug" / f"{company_id}_{year}.bin"
 
-    def _run() -> bool:
+    def _run() -> Tuple[bool, Optional[Path], Optional[Path]]:
+        print(f"\nProcessing: {company_id} {year}")
+        print(f"URL: {url}")
+
         try:
-            response = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout_seconds)
-            print(f"Status: {response.status_code}")
-
-            if response.status_code != 200:
-                print(f"Skipping: bad status ({response.status_code})")
-                return False
-
-            content_type = response.headers.get("Content-Type", "")
-            if "pdf" not in content_type.lower():
-                print(f"Skipping: not PDF ({content_type})")
-                return False
-
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with open(dest, "wb") as f:
-                f.write(response.content)
-
-            if not dest.exists() or dest.stat().st_size == 0:
-                print(f"Write failed: {dest}")
-                return False
-
-            print(f"Saved PDF: {dest}")
-            return True
+            response = requests.get(url, headers=HEADERS, timeout=30)
         except Exception as exc:
-            print(f"Skipping: exception ({exc})")
-            raise
+            print(f"ERROR request failed: {url} | {exc}")
+            return False, None, None
+
+        print(f"Status: {response.status_code}")
+        print(f"Content-Type: {response.headers.get('Content-Type')}")
+
+        if response.status_code != 200:
+            print("Skipping: bad status")
+            return False, None, None
+
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        with debug_path.open("wb") as handle:
+            handle.write(response.content)
+
+        print(f"Saved debug file: {debug_path}")
+
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "pdf" not in content_type and not url.lower().endswith(".pdf"):
+            print("Skipping: not a PDF (likely HTML page)")
+            return False, debug_path, None
+
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        with pdf_path.open("wb") as handle:
+            handle.write(response.content)
+
+        print(f"Saved PDF: {pdf_path}")
+        return True, debug_path, pdf_path
 
     return with_retry(_run, retries=retries)
 
@@ -245,7 +259,7 @@ def fetch_text(url: str, dest: Path, timeout_seconds: int, retries: int) -> None
     ensure_parent(dest)
 
     def _run():
-        req = Request(url, headers=REQUEST_HEADERS)
+        req = Request(url, headers=HEADERS)
         with urlopen(req, timeout=30) as response:
             dest.write_text(response.read().decode("utf-8", errors="replace"), encoding="utf-8")
 
@@ -362,7 +376,17 @@ def process_rows(
             error_message = ""
             try:
                 if row["source_type"] == "PDF":
-                    if not fetch_binary(row["url"], source_raw_path, timeout_seconds, retries):
+                    downloaded, debug_path, downloaded_pdf_path = fetch_binary(
+                        row["url"],
+                        row["company_id"],
+                        row["year"],
+                        output_root,
+                        timeout_seconds,
+                        retries,
+                    )
+                    if debug_path is not None:
+                        source_raw_path = debug_path
+                    if not downloaded:
                         status = "failed"
                         error_category = "download_failed"
                         error_message = f"PDF download was not saved for {row['url']}"
@@ -384,6 +408,8 @@ def process_rows(
                         )
                         continue
 
+                    if downloaded_pdf_path is not None:
+                        source_raw_path = downloaded_pdf_path
                     print(f"Saved RAW file: {source_raw_path}")
                     raw_saved_count += 1
                     ensure_parent(normalized_path)
@@ -446,7 +472,7 @@ def process_rows(
         writer.writeheader()
         writer.writerows(report_rows)
     json_report.write_text(json.dumps(report_rows, indent=2), encoding="utf-8")
-    print(f"Total PDFs successfully saved: {success_count}")
+    print(f"\nTOTAL PDFs SAVED: {success_count}")
     print(f"Total raw files saved: {raw_saved_count}")
     return csv_report, json_report
 
