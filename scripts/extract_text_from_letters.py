@@ -52,17 +52,12 @@ def configure_logging(output_root: Path, failure_log: Optional[Path] = None) -> 
 
 
 def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = None) -> Iterable[Path]:
-    pdf_files = list(
-        set(
-            list(input_root.rglob("*.pdf"))
-            + list((input_root / "raw").rglob("*.pdf"))
-        )
-    )
+    pdf_files = list(Path("output").rglob("*.pdf"))
     pdf_files = sorted(pdf_files)
-    print(f"Found {len(pdf_files)} PDF files (including raw)")
+    print(f"Discovered {len(pdf_files)} PDF files")
 
     if not pdf_files:
-        print("No PDFs found under output/ or output/raw. Check downloader output.")
+        print("No PDFs found under output/. Check downloader output.")
         return []
 
     if company_id is None:
@@ -73,26 +68,12 @@ def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = 
 
 def resolve_pdf_metadata(pdf_path: Path, input_root: Path) -> tuple[str, Optional[str], str]:
     year = pdf_path.stem
-    company_id = pdf_path.parent.name
-    document_type = None
+    path_parts = pdf_path.parts
+    if len(path_parts) < 3:
+        raise ValueError(f"Unexpected PDF path format: {pdf_path}")
 
-    raw_parts = pdf_path.parts
-    if "raw" in raw_parts:
-        raw_index = raw_parts.index("raw")
-        trailing_parts = raw_parts[raw_index + 1 :]
-        if len(trailing_parts) >= 3:
-            company_id = trailing_parts[0]
-            document_type = trailing_parts[1]
-            return company_id, document_type, year
-
-    try:
-        relative_parts = pdf_path.relative_to(input_root).parts
-    except ValueError:
-        relative_parts = pdf_path.parts
-
-    if len(relative_parts) >= 2:
-        company_id = relative_parts[-2]
-
+    company_id = path_parts[-3]
+    document_type = path_parts[-2]
     return company_id, document_type, year
 
 
