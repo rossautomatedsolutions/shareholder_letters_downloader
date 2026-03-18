@@ -55,16 +55,32 @@ def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = 
     if not input_root.exists():
         return []
 
-    if company_id:
-        target_dir = input_root / company_id / document_type
-        return sorted(target_dir.glob("*.pdf"))
+    pdf_files = sorted(input_root.rglob("*.pdf"))
+    print(f"Found {len(pdf_files)} PDF files")
 
-    pdf_paths = []
-    for company_dir in sorted(path for path in input_root.iterdir() if path.is_dir()):
-        target_dir = company_dir / document_type
-        if target_dir.exists():
-            pdf_paths.extend(sorted(target_dir.glob("*.pdf")))
-    return pdf_paths
+    if not pdf_files:
+        print("No PDFs found under output/. Check downloader output.")
+        return []
+
+    if company_id is None:
+        return pdf_files
+
+    return [pdf_path for pdf_path in pdf_files if company_id in pdf_path.parts]
+
+
+def resolve_pdf_metadata(pdf_path: Path, input_root: Path) -> tuple[str, str]:
+    year = pdf_path.stem
+    company_id = pdf_path.parent.name
+
+    try:
+        relative_parts = pdf_path.relative_to(input_root).parts
+    except ValueError:
+        relative_parts = pdf_path.parts
+
+    if len(relative_parts) >= 3:
+        company_id = relative_parts[0]
+
+    return company_id, year
 
 
 def extract_pdf_text(pdf_path: Path) -> str:
@@ -115,8 +131,7 @@ def run(
     failed_count = 0
 
     for pdf_path in iter_pdfs(input_root=input_root, document_type=document_type, company_id=company_id):
-        resolved_company_id = pdf_path.parent.parent.name
-        year = pdf_path.stem
+        resolved_company_id, year = resolve_pdf_metadata(pdf_path=pdf_path, input_root=input_root)
 
         if already_processed(output_root=output_root, company_id=resolved_company_id, year=year):
             skipped_count += 1
