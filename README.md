@@ -67,6 +67,12 @@ Build keyword features from extracted text files:
 python scripts/build_keyword_features.py
 ```
 
+Build sentiment features from extracted text files:
+
+```bash
+python scripts/build_sentiment_features.py
+```
+
 
 ## Output behavior
 
