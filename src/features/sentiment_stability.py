@@ -34,7 +34,7 @@ def build_sentiment_stability(df):
     if missing_columns:
         raise ValueError(f"Missing required column(s): {', '.join(missing_columns)}")
 
-    frame = df.loc[:, REQUIRED_COLUMNS].copy()
+    frame = df.loc[:, list(REQUIRED_COLUMNS)].copy()
     frame["company_id"] = frame["company_id"].astype(str)
     frame["year"] = frame["year"].astype(str)
     frame["sentiment_score"] = pd.to_numeric(frame["sentiment_score"], errors="raise")
