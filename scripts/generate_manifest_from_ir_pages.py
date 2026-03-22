@@ -83,12 +83,16 @@ REJECT_URL_KEYWORDS = (
     "proxy-statement",
     "ballot",
     "financials",
+    "financial-data",
+    "shareholder-information",
     "earnings",
     "presentation",
+    "transcript",
 )
 KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS = (
     re.compile(r"/letters/[^/]*ltr\.pdf$"),
 )
+BERKSHIRE_HATHAWAY_HOSTS = {"www.berkshirehathaway.com", "berkshirehathaway.com"}
 YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -141,19 +145,28 @@ def is_candidate_link(url: str, text: str) -> bool:
     lowered_text = text.lower()
     parsed_url = urlparse(url)
     parsed_path = parsed_url.path.lower()
+    basename = Path(parsed_path).name
+    hostname = parsed_url.netloc.lower()
 
     if ".pdf" not in parsed_path:
         return False
 
-    if any(keyword in lowered_url for keyword in REJECT_URL_KEYWORDS):
+    if any(keyword in lowered_url for keyword in REJECT_URL_KEYWORDS) or any(
+        keyword in lowered_text for keyword in REJECT_URL_KEYWORDS
+    ):
         return False
 
-    if any(keyword in lowered_url for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
+    if hostname in BERKSHIRE_HATHAWAY_HOSTS and any(
+        pattern.search(parsed_path) for pattern in KNOWN_SHAREHOLDER_LETTER_PATH_PATTERNS
+    ):
+        return True
+
+    if any(keyword in basename for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS) or any(
         keyword in lowered_text for keyword in ACCEPT_SHAREHOLDER_LETTER_KEYWORDS
     ):
         return True
 
-    return "annual" in lowered_url and "10-k" not in lowered_url and "10k" not in lowered_url
+    return "annual" in lowered_url and "report" in lowered_url and "10-k" not in lowered_url and "10k" not in lowered_url
 
 
 def confidence_score_for_url(url: str) -> float:
@@ -242,6 +255,59 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
                 "confidence_score": confidence_score_for_url(absolute_url),
             }
         )
+    return rows
+
+
+def scrape_berkshire_letters(minimum_expected_letters: int = 40) -> List[Dict[str, str]]:
+    if requests is None or BeautifulSoup is None:
+        raise ModuleNotFoundError(
+            "requests and beautifulsoup4 are required to scrape Berkshire Hathaway letters."
+        )
+
+    reports_url = "https://www.berkshirehathaway.com/reports.html"
+    response = request_with_retries(reports_url, timeout_seconds=REQUEST_TIMEOUT_SECONDS)
+    if response is None:
+        raise RuntimeError("Failed to fetch Berkshire Hathaway reports page.")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    rows: List[Dict[str, str]] = []
+    seen_urls = set()
+
+    for link in soup.find_all("a", href=True):
+        href = link.get("href", "").strip()
+        if ".pdf" not in href.lower():
+            continue
+
+        absolute_url = urljoin(reports_url, href)
+        if absolute_url in seen_urls:
+            continue
+        seen_urls.add(absolute_url)
+
+        link_text = " ".join(link.get_text(" ", strip=True).split())
+        rows.append(
+            {
+                "company_id": "berkshire_hathaway",
+                "company_name": "Berkshire Hathaway",
+                "document_type": "shareholder_letter",
+                "year": detect_year(absolute_url, link_text),
+                "source_type": "PDF",
+                "url": absolute_url,
+                "confidence_score": confidence_score_for_url(absolute_url),
+            }
+        )
+
+    if len(rows) < minimum_expected_letters:
+        raise RuntimeError(
+            f"Expected at least {minimum_expected_letters} Berkshire Hathaway letters, found {len(rows)}."
+        )
+
+    rows.sort(
+        key=lambda row: (
+            row["year"] == "",
+            -int(row["year"]) if row["year"] else 0,
+            row["url"],
+        )
+    )
     return rows
 
 
@@ -348,7 +414,10 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
         if company.company_id == "berkshire_hathaway":
-            company_rows = generate_berkshire_letters()
+            try:
+                company_rows = scrape_berkshire_letters()
+            except Exception:
+                company_rows = generate_berkshire_letters()
             rows.extend(company_rows)
         else:
             company_rows: List[Dict[str, str]] = []
