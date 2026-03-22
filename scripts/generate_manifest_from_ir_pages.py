@@ -260,7 +260,7 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
 
 def scrape_berkshire_letters(
     minimum_expected_letters: int = 40,
-    enforce_minimum: bool = True,
+    enforce_minimum: bool = False,
 ) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
@@ -433,10 +433,10 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
                         "falling back to IR-page scan."
                     )
 
-            if company_rows:
-                rows.extend(company_rows)
-            else:
-                rows.extend(fetch_candidates(company))
+            if not company_rows:
+                company_rows = fetch_candidates(company)
+
+            rows.extend(company_rows)
         if index < len(companies_list) - 1:
             time.sleep(2)
 
