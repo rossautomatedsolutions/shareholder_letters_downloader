@@ -50,6 +50,11 @@ class ManifestValidationError(Exception):
     pass
 
 
+def _is_valid_http_url(url: str) -> bool:
+    parsed = urlparse(str(url).strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download/render shareholder letters from a multi-company manifest.")
     parser.add_argument("--manifest", type=Path, default=Path("manifests/letters_manifest.csv"))
@@ -138,8 +143,7 @@ def validate_manifest(rows: Sequence[Dict[str, str]]) -> None:
         if not row["year"].isdigit():
             problems.append(f"Row {index}: year must be numeric (got '{row['year']}')")
 
-        parsed = urlparse(row["url"])
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if not _is_valid_http_url(row["url"]):
             problems.append(f"Row {index}: invalid URL '{row['url']}'")
 
         if key in key_guard:

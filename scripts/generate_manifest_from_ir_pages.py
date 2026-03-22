@@ -258,7 +258,10 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
     return rows
 
 
-def scrape_berkshire_letters(minimum_expected_letters: int = 40) -> List[Dict[str, str]]:
+def scrape_berkshire_letters(
+    minimum_expected_letters: int = 40,
+    enforce_minimum: bool = True,
+) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
             "requests and beautifulsoup4 are required to scrape Berkshire Hathaway letters."
@@ -296,7 +299,7 @@ def scrape_berkshire_letters(minimum_expected_letters: int = 40) -> List[Dict[st
             }
         )
 
-    if len(rows) < minimum_expected_letters:
+    if enforce_minimum and len(rows) < minimum_expected_letters:
         raise RuntimeError(
             f"Expected at least {minimum_expected_letters} Berkshire Hathaway letters, found {len(rows)}."
         )

@@ -19,6 +19,10 @@ OUTPUT_COLUMNS: Final[list[str]] = [
 DEFAULT_INPUT_PATH: Final[Path] = Path("features/sentiment_features.csv")
 DEFAULT_OUTPUT_PATH: Final[Path] = Path("features/sentiment_stability.csv")
 
+def _round_series(series: pd.Series) -> pd.Series:
+    return series.round(4)
+
+
 def _validate_columns(df: pd.DataFrame) -> None:
     """Raise a clear error when required input columns are missing."""
     missing_columns = [column for column in REQUIRED_COLUMNS if column not in df.columns]
@@ -59,8 +63,8 @@ def build_sentiment_stability(df: pd.DataFrame) -> pd.DataFrame:
     frame["expanding_median"] = frame.groupby("company_id", sort=False)["sentiment_score"].transform(
         lambda series: series.expanding(min_periods=1).median()
     )
-    frame["sentiment_deviation"] = (frame["sentiment_score"] - frame["expanding_median"]).abs()
-    frame["sentiment_stability_score"] = -frame["sentiment_deviation"]
+    frame["sentiment_deviation"] = _round_series((frame["sentiment_score"] - frame["expanding_median"]).abs())
+    frame["sentiment_stability_score"] = _round_series(-frame["sentiment_deviation"])
 
     return frame.loc[:, OUTPUT_COLUMNS]
 
