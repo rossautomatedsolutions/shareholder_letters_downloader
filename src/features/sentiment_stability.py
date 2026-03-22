@@ -60,8 +60,12 @@ def build_sentiment_stability(df: pd.DataFrame) -> pd.DataFrame:
     """Build sentiment stability features using an expanding median with no look-ahead bias."""
     frame = _prepare_frame(df)
 
-    frame["expanding_median"] = frame.groupby("company_id", sort=False)["sentiment_score"].transform(
-        lambda series: series.expanding(min_periods=1).median()
+    frame = frame.sort_values(["company_id", "year"]).reset_index(drop=True)
+    frame["expanding_median"] = (
+        frame.groupby("company_id")["sentiment_score"]
+        .expanding()
+        .median()
+        .reset_index(level=0, drop=True)
     )
     frame["sentiment_deviation"] = _round_series((frame["sentiment_score"] - frame["expanding_median"]).abs())
     frame["sentiment_stability_score"] = _round_series(-frame["sentiment_deviation"])

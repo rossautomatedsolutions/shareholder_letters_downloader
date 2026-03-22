@@ -38,13 +38,14 @@ def _validate_required_columns(frame) -> None:
 
 
 def _normalize_row(row: dict) -> dict:
-    normalized = dict(row)
-    normalized["document_type"] = str(normalized["document_type"]).lower().strip()
-    normalized["source_type"] = str(normalized["source_type"]).upper().strip()
-    normalized["url"] = str(normalized["url"]).strip()
-    normalized["company_id"] = str(normalized["company_id"]).strip()
-    normalized["company_name"] = str(normalized["company_name"]).strip()
-    normalized["confidence_score"] = str(normalized.get("confidence_score", "")).strip()
+    normalized = {key: str(value).strip() for key, value in dict(row).items()}
+    normalized["company_id"] = normalized.get("company_id", "").lower().strip()
+    normalized["company_name"] = normalized.get("company_name", "").strip()
+    normalized["document_type"] = normalized.get("document_type", "").lower().strip()
+    normalized["source_type"] = normalized.get("source_type", "").upper().strip()
+    normalized["url"] = normalized.get("url", "").strip()
+    normalized["confidence_score"] = normalized.get("confidence_score", "").strip()
+    normalized["year"] = normalized.get("year", "").strip()
 
     if "letter" in normalized["document_type"]:
         normalized["document_type"] = "shareholder_letter"
@@ -77,9 +78,6 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
 
     if confidence_score < 0.7:
         return "low_confidence_score"
-
-    if "letter" not in str(row["url"]).lower():
-        return "invalid_url_pattern"
 
     return ""
 
