@@ -416,14 +416,14 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
     companies_list = list(companies)
     rows: List[Dict[str, str]] = []
     for index, company in enumerate(companies_list):
+        company_rows: List[Dict[str, str]] = []
         if company.company_id == "berkshire_hathaway":
             try:
                 company_rows = scrape_berkshire_letters()
             except Exception:
-                company_rows = generate_berkshire_letters()
-            rows.extend(company_rows)
-        else:
-            company_rows: List[Dict[str, str]] = []
+                company_rows = []
+
+        if not company_rows:
             archive_scraper = get_archive_scraper(company.company_id) if get_archive_scraper else None
             if archive_scraper is not None:
                 company_rows = archive_scraper()
@@ -433,10 +433,16 @@ def generate_manifest(companies: Iterable[CompanyDefinition]):
                         "falling back to IR-page scan."
                     )
 
-            if not company_rows:
+        if not company_rows:
+            if company.company_id == "berkshire_hathaway":
+                try:
+                    company_rows = fetch_candidates(company)
+                except Exception:
+                    company_rows = generate_berkshire_letters()
+            else:
                 company_rows = fetch_candidates(company)
 
-            rows.extend(company_rows)
+        rows.extend(company_rows)
         if index < len(companies_list) - 1:
             time.sleep(2)
 
