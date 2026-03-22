@@ -15,6 +15,10 @@ _MARKET_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
 _REGIME_ORDER: Final[list[str]] = ["stable", "neutral", "unstable"]
 
 
+def _round_series(series: pd.Series) -> pd.Series:
+    return series.round(4)
+
+
 def _validate_columns(df: pd.DataFrame, required_columns: tuple[str, ...], name: str) -> None:
     """Raise a clear error when required columns are missing from a dataframe."""
     missing_columns = [column for column in required_columns if column not in df.columns]
@@ -48,6 +52,8 @@ def build_analysis_df(stability_df: pd.DataFrame, market_df: pd.DataFrame) -> pd
         .reset_index(drop=True)
     )
 
+    analysis_df["sentiment_deviation"] = _round_series(analysis_df["sentiment_deviation"])
+    analysis_df["next_year_return"] = _round_series(analysis_df["next_year_return"])
     return analysis_df
 
 
@@ -87,7 +93,8 @@ def compute_regime_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     percentage_columns = ["negative_return_pct", "above_20pct_return_pct"]
-    summary[percentage_columns] = summary[percentage_columns].mul(100)
+    summary[percentage_columns] = _round_series(summary[percentage_columns].mul(100))
+    summary[["mean_return", "median_return", "std_return"]] = summary[["mean_return", "median_return", "std_return"]].round(4)
     return summary
 
 
@@ -106,6 +113,7 @@ def compute_volatility_profile(df: pd.DataFrame) -> pd.DataFrame:
         .reindex(_REGIME_ORDER)
         .reset_index()
     )
+    profile[["average_absolute_return", "return_std_dev"]] = profile[["average_absolute_return", "return_std_dev"]].round(4)
     return profile
 
 
@@ -133,4 +141,4 @@ def get_execution_rules() -> pd.DataFrame:
 def compute_correlation(df: pd.DataFrame) -> float:
     """Return the correlation between sentiment deviation and next-year returns."""
     _validate_columns(df, ("sentiment_deviation", "next_year_return"), "df")
-    return float(df["sentiment_deviation"].corr(df["next_year_return"]))
+    return round(float(df["sentiment_deviation"].corr(df["next_year_return"])), 4)

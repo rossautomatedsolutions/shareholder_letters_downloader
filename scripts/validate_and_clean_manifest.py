@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import urlparse
 from datetime import datetime
 from typing import Dict, List
 
@@ -23,6 +24,11 @@ REQUIRED_COLUMNS = [
 
 ALLOWED_SOURCE_TYPES = {"PDF", "HTML"}
 DEDUPLICATION_KEYS = ["company_id", "year"]
+
+
+def _is_valid_http_url(url: str) -> bool:
+    parsed = urlparse(str(url).strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _validate_required_columns(frame) -> None:
@@ -55,8 +61,11 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
     if row["source_type"] not in ALLOWED_SOURCE_TYPES:
         return "invalid_source_type"
 
-    if not str(row["url"]).startswith("http"):
-        return "invalid_url"
+    if not _is_valid_http_url(row["url"]):
+        return "invalid_url_scheme"
+
+    if row["document_type"] != "shareholder_letter":
+        return "invalid_document_type"
 
     if not (1900 <= row["year"] <= current_year_plus_one):
         return "invalid_year_range"
@@ -68,6 +77,9 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
 
     if confidence_score < 0.7:
         return "low_confidence_score"
+
+    if "letter" not in str(row["url"]).lower():
+        return "invalid_url_pattern"
 
     return ""
 
