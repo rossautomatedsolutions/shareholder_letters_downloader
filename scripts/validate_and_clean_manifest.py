@@ -23,7 +23,8 @@ REQUIRED_COLUMNS = [
 ]
 
 ALLOWED_SOURCE_TYPES = {"PDF", "HTML"}
-DEDUPLICATION_KEYS = ["company_id", "year"]
+INVALID_URL_KEYWORDS = ("10k", "10-k", "proxy", "earnings", "presentation", "transcript")
+DEDUPLICATION_KEYS = ["company_id", "document_type", "year"]
 
 
 def _is_valid_http_url(url: str) -> bool:
@@ -53,6 +54,11 @@ def _normalize_row(row: dict) -> dict:
     return normalized
 
 
+def _has_valid_url_pattern(url: str) -> bool:
+    lowered_url = str(url).strip().lower()
+    return not any(keyword in lowered_url for keyword in INVALID_URL_KEYWORDS)
+
+
 def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
     try:
         row["year"] = int(row["year"])
@@ -70,6 +76,9 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
 
     if not (1900 <= row["year"] <= current_year_plus_one):
         return "invalid_year_range"
+
+    if not _has_valid_url_pattern(row["url"]):
+        return "invalid_url_pattern"
 
     try:
         confidence_score = float(row["confidence_score"])

@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Final
 
+import numpy as np
 import pandas as pd
 
 LOGGER = logging.getLogger(__name__)
@@ -61,13 +62,24 @@ def build_sentiment_stability(df: pd.DataFrame) -> pd.DataFrame:
     frame = _prepare_frame(df)
 
     frame = frame.sort_values(["company_id", "year"]).reset_index(drop=True)
-    frame["expanding_median"] = (
-        frame.groupby("company_id")["sentiment_score"]
-        .expanding()
-        .median()
-        .reset_index(level=0, drop=True)
-    )
-    frame["sentiment_deviation"] = _round_series((frame["sentiment_score"] - frame["expanding_median"]).abs())
+
+    def _apply_expanding_median(group: pd.DataFrame) -> pd.DataFrame:
+        medians = []
+        values = []
+
+        for val in group["sentiment_score"]:
+            if pd.notna(val):
+                values.append(val)
+            medians.append(float(np.median(values)) if values else np.nan)
+
+        group = group.copy()
+        group["expanding_median"] = medians
+        group["sentiment_deviation"] = _round_series(
+            (group["sentiment_score"] - group["expanding_median"]).abs()
+        )
+        return group
+
+    frame = frame.groupby("company_id", group_keys=False, sort=False).apply(_apply_expanding_median)
     frame["sentiment_stability_score"] = _round_series(-frame["sentiment_deviation"])
 
     return frame.loc[:, OUTPUT_COLUMNS]
