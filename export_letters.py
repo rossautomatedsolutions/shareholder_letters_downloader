@@ -7,7 +7,11 @@ import socket
 import ssl
 import time
 
-import requests
+try:
+    import requests
+except ModuleNotFoundError:  # pragma: no cover - handled at runtime
+    requests = None
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -221,6 +225,9 @@ def fetch_binary(
         print(f"\nProcessing: {company_id} {year}")
         print(f"URL: {url}")
 
+        if requests is None:
+            raise ModuleNotFoundError("requests is required to download letters.")
+
         try:
             response = requests.get(url, headers=HEADERS, timeout=30)
         except Exception as exc:
@@ -376,17 +383,23 @@ def process_rows(
             error_message = ""
             try:
                 if row["source_type"] == "PDF":
-                    downloaded, debug_path, downloaded_pdf_path = fetch_binary(
+                    fetch_result = fetch_binary(
                         row["url"],
-                        row["company_id"],
-                        row["year"],
-                        output_root,
+                        normalized_path,
                         timeout_seconds,
                         retries,
                     )
+                    if fetch_result is None:
+                        downloaded = normalized_path.exists()
+                        debug_path = None
+                        downloaded_pdf_path = normalized_path if downloaded else None
+                    else:
+                        downloaded, debug_path, downloaded_pdf_path = fetch_result
                     if debug_path is not None:
                         source_raw_path = debug_path
-                    if not downloaded:
+                    if downloaded_pdf_path is not None:
+                        source_raw_path = downloaded_pdf_path
+                    if not downloaded or downloaded_pdf_path is None:
                         status = "failed"
                         error_category = "download_failed"
                         error_message = f"PDF download was not saved for {row['url']}"
@@ -408,12 +421,8 @@ def process_rows(
                         )
                         continue
 
-                    if downloaded_pdf_path is not None:
-                        source_raw_path = downloaded_pdf_path
                     print(f"Saved RAW file: {source_raw_path}")
                     raw_saved_count += 1
-                    ensure_parent(normalized_path)
-                    shutil.copy2(source_raw_path, normalized_path)
                 else:
                     fetch_text(row["url"], source_raw_path, timeout_seconds, retries)
                     print(f"Saved RAW file: {source_raw_path}")

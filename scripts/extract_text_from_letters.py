@@ -52,12 +52,13 @@ def configure_logging(output_root: Path, failure_log: Optional[Path] = None) -> 
 
 
 def iter_pdfs(input_root: Path, document_type: str, company_id: Optional[str] = None) -> Iterable[Path]:
-    pdf_files = list(Path("output").rglob("*.pdf"))
-    pdf_files = sorted(pdf_files)
+    search_root = Path(input_root)
+    pattern = f"*/{document_type}/*.pdf"
+    pdf_files = sorted(search_root.glob(pattern))
     print(f"Discovered {len(pdf_files)} PDF files")
 
     if not pdf_files:
-        print("No PDFs found under output/. Check downloader output.")
+        print(f"No PDFs found under {search_root}/. Check downloader output.")
         return []
 
     if company_id is None:
