@@ -108,7 +108,7 @@ def validate_and_clean_manifest(
     current_year_plus_one = datetime.now().year + 1
 
     normalized_rows = [_normalize_row(raw_row) for raw_row in frame.to_dict(orient="records")]
-    accepted_rows: List[dict] = []
+    valid_rows: List[dict] = []
     rejected_rows: List[dict] = []
 
     for row in normalized_rows:
@@ -119,35 +119,35 @@ def validate_and_clean_manifest(
             rejected_rows.append(row)
             continue
 
-        accepted_rows.append(row)
+        valid_rows.append(row)
 
-    valid_rows = pd.DataFrame(accepted_rows)
+    valid_rows = pd.DataFrame(valid_rows)
     rejected_df = pd.DataFrame(rejected_rows)
 
     if valid_rows.empty:
-        deduped_valid_rows = valid_rows
         duplicate_rows = pd.DataFrame(columns=REQUIRED_COLUMNS + ["rejection_reason"])
     else:
-        deduped_valid_rows = valid_rows.drop_duplicates(subset=DEDUPLICATION_KEYS, keep="first")
         duplicate_rows = valid_rows[
             valid_rows.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
         ].copy()
-        if not duplicate_rows.empty:
-            duplicate_rows["rejection_reason"] = "duplicate_company_year"
+        valid_rows = valid_rows.drop_duplicates(subset=DEDUPLICATION_KEYS, keep="first")
+    if not duplicate_rows.empty:
+        duplicate_rows["rejection_reason"] = "duplicate_company_year"
 
-    duplicate_rows_removed = len(valid_rows) - len(deduped_valid_rows)
+    rows_accepted = len(valid_rows)
+    duplicate_rows_removed = rows_scanned - len(rejected_rows) - rows_accepted
 
     all_rejected = pd.concat([rejected_df, duplicate_rows], ignore_index=True)
 
     clean_output_path.parent.mkdir(parents=True, exist_ok=True)
     rejected_output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    deduped_valid_rows.to_csv(clean_output_path, index=False)
+    valid_rows.to_csv(clean_output_path, index=False)
     all_rejected.to_csv(rejected_output_path, index=False)
 
     summary = {
         "rows_scanned": rows_scanned,
-        "rows_accepted": len(deduped_valid_rows),
+        "rows_accepted": rows_accepted,
         "rows_rejected": len(all_rejected),
         "duplicate_rows_removed": duplicate_rows_removed,
     }
