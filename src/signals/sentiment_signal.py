@@ -92,6 +92,7 @@ def summarize_signal_returns(df: pd.DataFrame) -> pd.DataFrame:
         .sort_values("signal", kind="mergesort")
         .reset_index(drop=True)
     )
+    summary["average_next_year_return"] = summary["average_next_year_return"].round(2)
     return summary.loc[:, SUMMARY_COLUMNS]
 
 
