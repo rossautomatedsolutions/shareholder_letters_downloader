@@ -133,10 +133,11 @@ def validate_and_clean_manifest(
         valid_rows = valid_rows.drop_duplicates(
             subset=["company_id", "document_type", "year"]
         )
-    if not duplicate_rows.empty:
-        duplicate_rows["rejection_reason"] = "duplicate_company_year"
 
     rows_accepted = len(valid_rows)
+
+    if not duplicate_rows.empty:
+        duplicate_rows["rejection_reason"] = "duplicate_company_year"
     duplicate_rows_removed = len(duplicate_rows)
 
     all_rejected = pd.concat([rejected_df, duplicate_rows], ignore_index=True)
