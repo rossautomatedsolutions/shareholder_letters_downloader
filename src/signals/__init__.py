@@ -1,0 +1,1 @@
+"""Signal-building modules."""
