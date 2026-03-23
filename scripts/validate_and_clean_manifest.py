@@ -60,39 +60,34 @@ def _has_valid_url_pattern(url: str) -> bool:
 
 
 def _row_rejection_reasons(row: dict, current_year_plus_one: int) -> List[str]:
-    reasons: List[str] = []
-
     try:
         year = int(row["year"])
     except Exception:
         year = None
-        reasons.append("invalid_year")
-
-    if row["document_type"] != "shareholder_letter":
-        reasons.append("invalid_document_type")
-
-    if row["source_type"] not in ALLOWED_SOURCE_TYPES:
-        reasons.append("invalid_source_type")
-
-    if not _is_valid_http_url(row["url"]):
-        reasons.append("invalid_url_scheme")
-
-    if year is not None and not (1900 <= year <= current_year_plus_one):
-        reasons.append("invalid_year_range")
-
-    if not _has_valid_url_pattern(row["url"]):
-        reasons.append("invalid_url_pattern")
 
     try:
         confidence_score = float(row["confidence_score"])
     except Exception:
         confidence_score = None
-        reasons.append("invalid_confidence_score")
 
-    if confidence_score is not None and confidence_score < 0.5:
-        reasons.append("low_confidence_score")
+    if year is None:
+        return ["invalid_year"]
+    elif row["document_type"] != "shareholder_letter":
+        return ["invalid_document_type"]
+    elif row["source_type"] not in ALLOWED_SOURCE_TYPES:
+        return ["invalid_source_type"]
+    elif not _is_valid_http_url(row["url"]):
+        return ["invalid_url_scheme"]
+    elif year is not None and not (1900 <= year <= current_year_plus_one):
+        return ["invalid_year_range"]
+    elif not _has_valid_url_pattern(row["url"]):
+        return ["invalid_url_pattern"]
+    elif confidence_score is None:
+        return ["invalid_confidence_score"]
+    elif confidence_score < 0.5:
+        return ["low_confidence_score"]
 
-    return reasons
+    return []
 
 
 def validate_and_clean_manifest(
