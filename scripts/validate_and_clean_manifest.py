@@ -59,36 +59,40 @@ def _has_valid_url_pattern(url: str) -> bool:
     return not any(keyword in lowered_url for keyword in INVALID_URL_KEYWORDS)
 
 
-def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
+def _row_rejection_reasons(row: dict, current_year_plus_one: int) -> List[str]:
+    reasons: List[str] = []
+
     try:
-        row["year"] = int(row["year"])
+        year = int(row["year"])
     except Exception:
-        return "invalid_year"
+        year = None
+        reasons.append("invalid_year")
 
     if row["document_type"] != "shareholder_letter":
-        return "invalid_document_type"
+        reasons.append("invalid_document_type")
 
     if row["source_type"] not in ALLOWED_SOURCE_TYPES:
-        return "invalid_source_type"
+        reasons.append("invalid_source_type")
 
     if not _is_valid_http_url(row["url"]):
-        return "invalid_url_scheme"
+        reasons.append("invalid_url_scheme")
 
-    if not (1900 <= row["year"] <= current_year_plus_one):
-        return "invalid_year_range"
+    if year is not None and not (1900 <= year <= current_year_plus_one):
+        reasons.append("invalid_year_range")
 
     if not _has_valid_url_pattern(row["url"]):
-        return "invalid_url_pattern"
+        reasons.append("invalid_url_pattern")
 
     try:
         confidence_score = float(row["confidence_score"])
     except Exception:
-        return "invalid_confidence_score"
+        confidence_score = None
+        reasons.append("invalid_confidence_score")
 
-    if confidence_score < 0.5:
-        return "low_confidence_score"
+    if confidence_score is not None and confidence_score < 0.5:
+        reasons.append("low_confidence_score")
 
-    return ""
+    return reasons
 
 
 def validate_and_clean_manifest(
@@ -112,11 +116,11 @@ def validate_and_clean_manifest(
     rejected_rows: List[dict] = []
 
     for row in normalized_rows:
-        rejection_reason = _row_rejection_reason(row, current_year_plus_one)
+        rejection_reasons = _row_rejection_reasons(row, current_year_plus_one)
 
-        if rejection_reason:
-            row["rejection_reason"] = rejection_reason
-            rejected_rows.append(row)
+        if rejection_reasons:
+            for rejection_reason in rejection_reasons:
+                rejected_rows.append({**row, "rejection_reason": rejection_reason})
             continue
 
         valid_rows.append(row)
