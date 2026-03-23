@@ -121,18 +121,21 @@ def validate_and_clean_manifest(
 
         valid_rows.append(row)
 
-    valid_rows = pd.DataFrame(valid_rows)
+    validated_rows = pd.DataFrame(valid_rows)
     rejected_df = pd.DataFrame(rejected_rows)
 
-    if valid_rows.empty:
+    if validated_rows.empty:
         duplicate_rows = pd.DataFrame(columns=REQUIRED_COLUMNS + ["rejection_reason"])
+        valid_rows = validated_rows
     else:
-        duplicate_rows = valid_rows[
-            valid_rows.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
+        duplicate_rows = validated_rows[
+            validated_rows.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
         ].copy()
-        valid_rows = valid_rows.drop_duplicates(
-            subset=["company_id", "document_type", "year"]
-        )
+        valid_rows = validated_rows
+
+    valid_rows = valid_rows.drop_duplicates(
+        subset=["company_id", "document_type", "year"]
+    )
 
     rows_accepted = len(valid_rows)
 
