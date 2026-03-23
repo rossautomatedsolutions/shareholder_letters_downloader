@@ -22,7 +22,7 @@ REQUIRED_COLUMNS = [
     "confidence_score",
 ]
 
-ALLOWED_SOURCE_TYPES = {"PDF", "HTML"}
+ALLOWED_SOURCE_TYPES = {"PDF"}
 INVALID_URL_KEYWORDS = ("10k", "10-k", "proxy", "earnings", "presentation", "transcript")
 DEDUPLICATION_KEYS = ["company_id", "document_type", "year"]
 
@@ -85,7 +85,7 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
     except Exception:
         return "invalid_confidence_score"
 
-    if confidence_score < 0.7:
+    if confidence_score < 0.5:
         return "low_confidence_score"
 
     return ""
