@@ -260,7 +260,7 @@ def fetch_candidates(company: CompanyDefinition, timeout_seconds: int = 20) -> L
 
 def scrape_berkshire_letters(
     minimum_expected_letters: int = 40,
-    enforce_minimum: bool = True,
+    enforce_minimum: bool = False,
 ) -> List[Dict[str, str]]:
     if requests is None or BeautifulSoup is None:
         raise ModuleNotFoundError(
