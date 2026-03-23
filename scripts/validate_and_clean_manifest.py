@@ -65,14 +65,14 @@ def _row_rejection_reason(row: dict, current_year_plus_one: int) -> str:
     except Exception:
         return "invalid_year"
 
+    if row["document_type"] != "shareholder_letter":
+        return "invalid_document_type"
+
     if row["source_type"] not in ALLOWED_SOURCE_TYPES:
         return "invalid_source_type"
 
     if not _is_valid_http_url(row["url"]):
         return "invalid_url_scheme"
-
-    if row["document_type"] != "shareholder_letter":
-        return "invalid_document_type"
 
     if not (1900 <= row["year"] <= current_year_plus_one):
         return "invalid_year_range"
