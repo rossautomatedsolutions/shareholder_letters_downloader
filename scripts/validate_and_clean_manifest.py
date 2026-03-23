@@ -121,34 +121,38 @@ def validate_and_clean_manifest(
 
         valid_rows.append(row)
 
-    validated_rows = pd.DataFrame(valid_rows)
+    valid_df = pd.DataFrame(valid_rows)
     rejected_df = pd.DataFrame(rejected_rows)
 
-    if validated_rows.empty:
+    if valid_df.empty:
         duplicate_rows = pd.DataFrame(columns=REQUIRED_COLUMNS + ["rejection_reason"])
-        valid_rows = validated_rows
     else:
-        duplicate_rows = validated_rows[
-            validated_rows.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
+        duplicate_rows = valid_df[
+            valid_df.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
         ].copy()
-        valid_rows = validated_rows
 
-    valid_rows = valid_rows.drop_duplicates(
+    before_dedup = len(valid_df)
+
+    valid_df = valid_df.drop_duplicates(
         subset=["company_id", "document_type", "year"]
     )
 
-    rows_accepted = len(valid_rows)
+    after_dedup = len(valid_df)
+
+    duplicates_removed = before_dedup - after_dedup
+
+    rows_accepted = after_dedup
 
     if not duplicate_rows.empty:
         duplicate_rows["rejection_reason"] = "duplicate_company_year"
-    duplicate_rows_removed = len(duplicate_rows)
+    duplicate_rows_removed = duplicates_removed
 
     all_rejected = pd.concat([rejected_df, duplicate_rows], ignore_index=True)
 
     clean_output_path.parent.mkdir(parents=True, exist_ok=True)
     rejected_output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    valid_rows.to_csv(clean_output_path, index=False)
+    valid_df.to_csv(clean_output_path, index=False)
     all_rejected.to_csv(rejected_output_path, index=False)
 
     summary = {
