@@ -87,7 +87,17 @@ def build_sentiment_stability(df: pd.DataFrame) -> pd.DataFrame:
         )
         return group
 
-    frame = frame.groupby("company_id", group_keys=False, sort=False).apply(_apply_rolling_median)
+    groups = [
+        _apply_rolling_median(group)
+        for _, group in frame.groupby("company_id", sort=False)
+    ]
+    if groups:
+        frame = pd.concat(groups, ignore_index=True)
+    else:
+        frame = frame.copy()
+        frame["rolling_median"] = pd.Series(dtype="float64")
+        frame["sentiment_deviation"] = pd.Series(dtype="float64")
+
     frame["sentiment_stability_score"] = _round_series(-frame["sentiment_deviation"])
 
     return frame.loc[:, OUTPUT_COLUMNS]
