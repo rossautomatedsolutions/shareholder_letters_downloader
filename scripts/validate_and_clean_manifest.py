@@ -48,7 +48,7 @@ def _normalize_row(row: dict) -> dict:
     normalized["confidence_score"] = normalized.get("confidence_score", "").strip()
     normalized["year"] = normalized.get("year", "").strip()
 
-    if "letter" in normalized["document_type"]:
+    if normalized["document_type"] in {"shareholder letter", "shareholder-letter"}:
         normalized["document_type"] = "shareholder_letter"
 
     return normalized
@@ -60,32 +60,33 @@ def _has_valid_url_pattern(url: str) -> bool:
 
 
 def _row_rejection_reasons(row: dict, current_year_plus_one: int) -> List[str]:
-    try:
-        year = int(row["year"])
-    except Exception:
-        year = None
+    year = str(row["year"]).strip()
 
     try:
         confidence_score = float(row["confidence_score"])
     except Exception:
         confidence_score = None
 
-    if year is None:
+    if not year.isdigit():
         return ["invalid_year"]
     elif row["document_type"] != "shareholder_letter":
         return ["invalid_document_type"]
-    elif row["source_type"] not in ALLOWED_SOURCE_TYPES:
+    elif row["source_type"] != "PDF":
         return ["invalid_source_type"]
     elif not _is_valid_http_url(row["url"]):
         return ["invalid_url_scheme"]
-    elif year is not None and not (1900 <= year <= current_year_plus_one):
-        return ["invalid_year_range"]
-    elif not _has_valid_url_pattern(row["url"]):
+    elif "presentation" in str(row["url"]).lower():
         return ["invalid_url_pattern"]
     elif confidence_score is None:
         return ["invalid_confidence_score"]
     elif confidence_score < 0.5:
         return ["low_confidence_score"]
+
+    year_int = int(year)
+    if not (1900 <= year_int <= current_year_plus_one):
+        return ["invalid_year_range"]
+    elif not _has_valid_url_pattern(row["url"]):
+        return ["invalid_url_pattern"]
 
     return []
 
