@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from statistics import median
 from typing import Final
 
-import numpy as np
 import pandas as pd
 
 LOGGER = logging.getLogger(__name__)
@@ -58,28 +58,36 @@ def _prepare_frame(df: pd.DataFrame) -> pd.DataFrame:
     return deduplicated
 
 def build_sentiment_stability(df: pd.DataFrame) -> pd.DataFrame:
-    """Build sentiment stability features using an expanding median with no look-ahead bias."""
+    """Build sentiment stability features using a custom rolling-median baseline."""
     frame = _prepare_frame(df)
 
     frame = frame.sort_values(["company_id", "year"]).reset_index(drop=True)
 
-    def _apply_expanding_median(group: pd.DataFrame) -> pd.DataFrame:
-        medians = []
+    def _apply_rolling_median(group: pd.DataFrame) -> pd.DataFrame:
+        rolling_medians = []
         values = []
+        prior_median = float("nan")
 
         for val in group["sentiment_score"]:
             if pd.notna(val):
                 values.append(val)
-            medians.append(float(np.median(values)) if values else np.nan)
+                current_median = float(median(values))
+                if len(values) >= 4 and pd.notna(prior_median):
+                    current_median = float((prior_median + current_median) / 2.0)
+                prior_median = current_median
+                rolling_medians.append(current_median)
+                continue
+
+            rolling_medians.append(float("nan"))
 
         group = group.copy()
-        group["expanding_median"] = medians
+        group["rolling_median"] = rolling_medians
         group["sentiment_deviation"] = _round_series(
-            (group["sentiment_score"] - group["expanding_median"]).abs()
+            (group["sentiment_score"] - group["rolling_median"]).abs()
         )
         return group
 
-    frame = frame.groupby("company_id", group_keys=False, sort=False).apply(_apply_expanding_median)
+    frame = frame.groupby("company_id", group_keys=False, sort=False).apply(_apply_rolling_median)
     frame["sentiment_stability_score"] = _round_series(-frame["sentiment_deviation"])
 
     return frame.loc[:, OUTPUT_COLUMNS]

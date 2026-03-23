@@ -107,11 +107,11 @@ def validate_and_clean_manifest(
     rows_scanned = len(frame)
     current_year_plus_one = datetime.now().year + 1
 
+    normalized_rows = [_normalize_row(raw_row) for raw_row in frame.to_dict(orient="records")]
     accepted_rows: List[dict] = []
     rejected_rows: List[dict] = []
 
-    for raw_row in frame.to_dict(orient="records"):
-        row = _normalize_row(raw_row)
+    for row in normalized_rows:
         rejection_reason = _row_rejection_reason(row, current_year_plus_one)
 
         if rejection_reason:
