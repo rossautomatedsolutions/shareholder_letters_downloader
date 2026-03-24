@@ -1,206 +1,196 @@
-# Multi-Company Shareholder Letter Downloader
+# Shareholder Letters Downloader
 
-This repository provides a deterministic ingestion pipeline for building a normalized corpus of shareholder letters across multiple companies.
+A deterministic research pipeline for building a structured dataset of shareholder letters across multiple companies. The project ingests source documents from a normalized manifest, downloads and organizes the underlying files, extracts machine-readable text, computes reusable NLP-style features, and converts those features into simple interpretable signals for downstream analysis.
 
-## Manifest format
+The repository exists to make shareholder-letter research reproducible. Instead of treating annual letters as ad hoc documents, it models them as a consistent time series: each company-year observation can be validated, extracted, transformed into features, and compared over time without introducing hidden manual steps or lookahead bias.
 
-The pipeline uses a **unified manifest** at `manifests/letters_manifest.csv` with required columns:
+## Overview
 
-- `company_id`
-- `company_name`
-- `document_type`
-- `year`
-- `source_type` (`HTML` or `PDF`)
-- `url`
+This project turns raw shareholder-letter links into a research-ready dataset. Starting from a manifest of company, year, and source metadata, the pipeline validates each record, downloads or renders the source document, normalizes the output layout, and extracts text into a consistent folder structure. From there, the repository builds sentiment and keyword features, computes stability and deviation metrics over time, and derives simple sentiment-based signals.
 
-Optional columns are supported and preserved in the manifest:
+The emphasis is on deterministic execution. Given the same manifest and source files, the pipeline produces the same normalized outputs and feature tables, making it suitable for portfolio projects, systematic research workflows, and backtesting-oriented experimentation.
 
-- `language`
-- `fiscal_year_end`
-- `notes`
+## Architecture
 
-Uniqueness is enforced on `(company_id, document_type, year)`.
+The project is organized as a linear research pipeline:
 
-## Project layout
+```text
+Data -> Extraction -> Features -> Signals
+```
 
-- `manifests/` - source manifests
-- `config/` - optional per-company rendering overrides
-- `output/` - normalized PDFs and raw fetched artifacts
-- `reports/` - machine-readable run summaries
-- `tests/` - schema and path-generation checks
+### 1. Data
+
+A manifest defines the universe of documents to ingest. Each row includes the company identifier, document type, year, source type, and URL. Validation enforces required columns, type constraints, and uniqueness of `(company_id, document_type, year)` before ingestion begins.
+
+### 2. Extraction
+
+The ingestion step downloads or renders the original shareholder letter into a normalized PDF layout. A text-extraction step then reads those PDFs and writes plain-text outputs plus lightweight metadata such as character count and word count.
+
+### 3. Features
+
+Feature builders transform extracted text into structured tabular outputs:
+
+- sentiment scores based on positive and negative lexicons
+- keyword frequency tables
+- sentiment deviation and stability features computed over time within each company
+
+### 4. Signals
+
+The signal layer converts feature tables into simple directional labels. In the current implementation, expanding within-company percentile ranks are used to classify observations into `bullish`, `neutral`, or `bearish` buckets based on sentiment deviation, preserving a no-lookahead workflow.
+
+## Features
+
+- Multi-company ingestion from a unified manifest
+- Deterministic manifest validation and normalization
+- PDF-to-text extraction with metadata sidecars
+- Sentiment and keyword feature generation
+- Stability and deviation modeling over time
+- Signal generation from sentiment-derived features
+
+## Project Structure
+
+### `manifests/`
+
+Stores the primary input manifest and supporting templates. This is the entry point for defining which shareholder letters belong in the dataset.
+
+### `scripts/`
+
+Contains command-line utilities for each pipeline stage, including manifest cleaning, text extraction, keyword generation, sentiment feature generation, and stability calculations.
+
+### `src/`
+
+Holds the reusable Python modules for feature engineering and signal construction. This is where the core logic for stability modeling and signal generation lives.
+
+### `features/`
+
+Output location for generated feature tables such as sentiment scores, keyword counts, and sentiment stability metrics.
+
+### `tests/`
+
+Automated tests covering ingestion, manifest validation, extraction, feature engineering, and signal behavior. The suite is designed to protect deterministic behavior and no-lookahead assumptions.
 
 ## Usage
 
-Run all companies:
+### 1. Ingestion
+
+Download or render shareholder letters from the manifest:
 
 ```bash
 python export_letters.py
 ```
 
-Run a single company:
+Run for a single company:
 
 ```bash
 python export_letters.py --company berkshire_hathaway
 ```
 
-Use custom paths:
-
-```bash
-python export_letters.py --manifest manifests/letters_manifest.csv --output-root output --reports-dir reports
-```
-
-Optional URL preflight validation:
+Optionally validate URLs before running ingestion:
 
 ```bash
 python export_letters.py --preflight-urls
 ```
 
-Extract/refresh letter metadata from downloaded PDFs:
+### 2. Text extraction
+
+Convert normalized PDFs into plain text and metadata files:
 
 ```bash
-python scripts/extract_letter_metadata.py
+python scripts/extract_text_from_letters.py
 ```
 
-Build keyword features from extracted text files:
+### 3. Feature generation
 
-```bash
-python scripts/build_keyword_features.py
-```
-
-Build sentiment features from extracted text files:
+Build sentiment features:
 
 ```bash
 python scripts/build_sentiment_features.py
 ```
 
-
-## Output behavior
-
-For each row, the pipeline writes:
-
-- Normalized PDF at `output/<company_id>/<document_type>/<year>.pdf`
-- Raw artifact at `output/raw/<company_id>/<document_type>/<year>.<ext>`
-- Metadata sidecar at `output/<company_id>/<document_type>/<year>.metadata.json`
-
-Each run also writes:
-
-- `reports/run_report_<timestamp>.csv`
-- `reports/run_report_<timestamp>.json`
-
-## Validation and reliability
-
-Before ingestion, the pipeline validates:
-
-- required columns
-- allowed `source_type`
-- numeric `year`
-- unique `(company_id, document_type, year)` keys
-- URL format (and optionally preflight checks)
-
-Runtime reliability features include:
-
-- retry + exponential backoff for network/render operations
-- categorized errors in reports (timeouts, SSL, DNS/connection, HTTP classes)
-- per-company rendering overrides via `config/rendering_overrides.json`
-
-
-
-## Running multiple companies in batches
-
-Use the helper script to run one company at a time (useful for retries and smoke tests):
+Build keyword features:
 
 ```bash
-python scripts/run_multiple_companies.py --preflight-urls
+python scripts/build_keyword_features.py
 ```
 
-Run only a subset:
+Build sentiment stability and deviation features:
 
 ```bash
-python scripts/run_multiple_companies.py --companies berkshire_hathaway apple microsoft
+python scripts/build_sentiment_stability.py
 ```
 
-Stop as soon as one company fails:
+### 4. Signal generation
+
+Signals are generated from the sentiment feature set plus sentiment deviation. The repository exposes this through the reusable signal module in `src/signals/sentiment_signal.py`:
 
 ```bash
-python scripts/run_multiple_companies.py --stop-on-error
+python - <<'PY'
+import pandas as pd
+from src.signals.sentiment_signal import build_sentiment_signal
+
+frame = pd.read_csv("features/sentiment_stability.csv")
+signals = build_sentiment_signal(frame)
+print(signals.head())
+PY
 ```
 
-## Preparing your own company link data
+## Example Output
 
-1. Copy the template:
+### `features/sentiment_features.csv`
 
-```bash
-cp manifests/letters_manifest.template.csv manifests/letters_manifest.csv
+```csv
+company_id,year,sentiment_score
+acme_inc,2022,0.500000
+beta_corp,2021,-0.500000
 ```
 
-2. Populate rows with real `url` values and keep `(company_id, document_type, year)` unique.
-3. Validate links before download/render:
+### Signal output
 
-```bash
-python export_letters.py --preflight-urls
+```csv
+company_id,year,sentiment_score,sentiment_deviation,sentiment_rank,deviation_rank,signal
+acme,2020,0.10,0.40,0.5,0.5,neutral
+acme,2021,0.20,0.10,1.0,0.0,bullish
+beta,2020,-0.10,0.70,0.5,0.5,neutral
 ```
 
-## Automatically Generating a Manifest
-
-You can generate a draft manifest of shareholder-letter PDF candidates from company investor-relations pages:
-
-```bash
-python scripts/generate_manifest_from_ir_pages.py
-```
-
-The script writes results to `manifests/letters_manifest.auto.csv` using the existing manifest schema.
-Review the generated rows, verify that each URL is a valid shareholder letter, and then copy valid rows into `manifests/letters_manifest.csv`.
-
-### Optional SEC EDGAR-based generator
-
-You can also generate a backup manifest from SEC EDGAR submissions by scanning recent `10-K` filing indexes and extracting links that match:
-
-- `Letter to Shareholders`
-- `CEO Letter`
-- `Chairman Letter`
-
-Both `HTML` and `PDF` links are supported so this can supplement the IR-page scraper output.
-
-By default, the SEC generator scans the latest `10-K` for each ticker (`--max-filings-per-company 1`).
-Increase this value (or set `0`) to scan more historical filings when needed.
-
-Example:
-
-```bash
-python scripts/generate_manifest_from_sec.py --tickers AAPL MSFT AMZN JPM --years 10 --max-filings-per-company 1
-```
-
-This writes `manifests/letters_manifest.sec.csv` with rows in the standard manifest schema (`company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`).
-
-## Manifest cleaning utility
-
-Before ingestion, you can clean and validate the primary manifest:
-
-```bash
-python scripts/validate_and_clean_manifest.py
-```
-
-This command reads `manifests/letters_manifest.csv` and writes:
-
-- Cleaned manifest: `manifests/letters_manifest.cleaned.csv`
-- Rejected rows report: `reports/rejected_manifest_rows.csv`
-
-Validation rules enforced:
-
-- Required columns: `company_id`, `company_name`, `document_type`, `year`, `source_type`, `url`
-- `year` must be numeric
-- `source_type` must be `PDF` or `HTML`
-- `document_type` must be exactly `shareholder_letter`
-- `url` must start with `http`
-- Rows with URLs containing `proxy`, `corporate-data`, `financial-statements`, or `earnings-presentation` are rejected
-- Duplicate rows are removed using `(company_id, year)` (first valid row is kept)
-
-The script prints a summary with rows scanned, accepted, rejected, and duplicate rows removed.
+These outputs are intentionally simple: feature tables remain easy to audit, and signal outputs stay interpretable enough for downstream backtests or portfolio research notebooks.
 
 ## Testing
 
-Run:
+Run the full automated suite with `pytest`:
 
 ```bash
-python -m unittest discover -s tests
+pytest
 ```
+
+Run a specific test module:
+
+```bash
+pytest tests/test_sentiment_signal.py
+```
+
+The test suite validates manifest rules, extraction behavior, feature calculations, stability logic, and signal construction. In particular, several tests verify that the rolling and expanding computations do not rely on future observations.
+
+## Design Principles
+
+### Deterministic pipeline
+
+The pipeline favors explicit schemas, fixed output paths, and repeatable transformations so results can be reproduced reliably.
+
+### No lookahead bias
+
+Time-series feature engineering and signal generation are built using expanding historical information only, which keeps the outputs aligned with realistic research and backtesting constraints.
+
+### Modular architecture
+
+Each pipeline stage is separated into focused scripts and reusable modules, making it easy to extend or swap individual components.
+
+### Test-driven development
+
+The repository includes a broad automated test suite to protect expected behavior as the project evolves.
+
+## Future Work
+
+- Expand manifest coverage across more companies, sectors, and geographies
+- Add richer NLP techniques, including LLM-assisted document analysis and topic extraction
+- Integrate generated signals with downstream backtesting or trading-system workflows
