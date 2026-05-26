@@ -20,7 +20,22 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-ALLOWED_SOURCE_TYPES = {"HTML", "PDF"}
+CANONICAL_SOURCE_TYPES = {
+    "standalone_letter_pdf",
+    "annual_report_pdf",
+    "html_letter",
+    "manual_review_needed",
+}
+SOURCE_TYPE_ALIASES = {
+    "pdf": "standalone_letter_pdf",
+    "html": "html_letter",
+    "standalone_letter_pdf": "standalone_letter_pdf",
+    "annual_report_pdf": "annual_report_pdf",
+    "html_letter": "html_letter",
+    "manual_review_needed": "manual_review_needed",
+}
+PDF_SOURCE_TYPES = {"standalone_letter_pdf", "annual_report_pdf"}
+HTML_SOURCE_TYPES = {"html_letter"}
 
 
 HEADERS = {
@@ -48,6 +63,11 @@ class RenderConfig:
 
 class ManifestValidationError(Exception):
     pass
+
+
+def normalize_source_type(value: str) -> str:
+    normalized = str(value).strip().lower()
+    return SOURCE_TYPE_ALIASES.get(normalized, normalized)
 
 
 def _is_valid_http_url(url: str) -> bool:
@@ -121,6 +141,8 @@ def load_render_overrides(path: Path) -> Dict[str, RenderConfig]:
 def load_manifest(path: Path) -> List[Dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+    for row in rows:
+        row["source_type"] = normalize_source_type(row.get("source_type", ""))
     validate_manifest(rows)
     return rows
 
@@ -138,7 +160,7 @@ def validate_manifest(rows: Sequence[Dict[str, str]]) -> None:
     for index, row in enumerate(rows, start=2):
         key = (row["company_id"], row["document_type"], row["year"])
 
-        if row["source_type"] not in ALLOWED_SOURCE_TYPES:
+        if row["source_type"] not in CANONICAL_SOURCE_TYPES:
             problems.append(f"Row {index}: invalid source_type '{row['source_type']}'")
         if not row["year"].isdigit():
             problems.append(f"Row {index}: year must be numeric (got '{row['year']}')")
@@ -208,10 +230,10 @@ def normalized_pdf_path(output_root: Path, row: Dict[str, str]) -> Path:
 
 
 def raw_path(output_root: Path, row: Dict[str, str]) -> Path:
-    ext = ".pdf" if row["source_type"] == "PDF" else ".html"
+    ext = ".pdf" if row["source_type"] in PDF_SOURCE_TYPES else ".html"
     output_path = output_root / "raw" / row["company_id"] / row["document_type"] / f"{row['year']}{ext}"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    return output_path.with_suffix(".pdf") if row["source_type"] == "PDF" else output_path
+    return output_path.with_suffix(".pdf") if row["source_type"] in PDF_SOURCE_TYPES else output_path
 
 
 def fetch_binary(
@@ -264,6 +286,13 @@ def fetch_binary(
         return True, debug_path, pdf_path
 
     return with_retry(_run, retries=retries)
+
+
+def normalize_pdf_artifact(downloaded_pdf_path: Path, normalized_path: Path) -> Path:
+    """Copy a downloaded PDF into the normalized company/document/year path."""
+    normalized_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(downloaded_pdf_path, normalized_path)
+    return normalized_path
 
 
 def fetch_text(url: str, dest: Path, timeout_seconds: int, retries: int) -> None:
@@ -386,10 +415,12 @@ def process_rows(
             error_category = ""
             error_message = ""
             try:
-                if row["source_type"] == "PDF":
+                if row["source_type"] in PDF_SOURCE_TYPES:
                     fetch_result = fetch_binary(
                         row["url"],
-                        normalized_path,
+                        row["company_id"],
+                        row["year"],
+                        output_root,
                         timeout_seconds,
                         retries,
                     )
@@ -425,15 +456,20 @@ def process_rows(
                         )
                         continue
 
+                    normalize_pdf_artifact(downloaded_pdf_path, normalized_path)
                     print(f"Saved RAW file: {source_raw_path}")
                     raw_saved_count += 1
-                else:
+                elif row["source_type"] in HTML_SOURCE_TYPES:
                     fetch_text(row["url"], source_raw_path, timeout_seconds, retries)
                     print(f"Saved RAW file: {source_raw_path}")
                     raw_saved_count += 1
                     render_cfg = render_overrides.get(row["company_id"], RenderConfig())
                     render_html_to_pdf(
                         ensure_page(), source_raw_path, normalized_path, timeout_seconds, retries, render_cfg
+                    )
+                else:
+                    raise ManifestValidationError(
+                        f"Row {row['company_id']} {row['year']} requires manual source review before download."
                     )
 
                 success_count += 1

@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime
@@ -19,12 +20,37 @@ REQUIRED_COLUMNS = [
     "year",
     "source_type",
     "url",
-    "confidence_score",
 ]
+OPTIONAL_COLUMNS = ["confidence_score"]
 
-ALLOWED_SOURCE_TYPES = {"PDF"}
+CANONICAL_SOURCE_TYPES = {
+    "standalone_letter_pdf",
+    "annual_report_pdf",
+    "html_letter",
+    "manual_review_needed",
+}
+SOURCE_TYPE_ALIASES = {
+    "pdf": "standalone_letter_pdf",
+    "html": "html_letter",
+    "standalone_letter_pdf": "standalone_letter_pdf",
+    "annual_report_pdf": "annual_report_pdf",
+    "html_letter": "html_letter",
+    "manual_review_needed": "manual_review_needed",
+}
+ALLOWED_DOCUMENT_TYPES = {"shareholder_letter", "chairman_letter", "annual_letter"}
 INVALID_URL_KEYWORDS = ("10k", "10-k", "proxy", "earnings", "presentation", "transcript")
 DEDUPLICATION_KEYS = ["company_id", "document_type", "year"]
+DEFAULT_CONFIDENCE_SCORE = "1.0"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate and clean a shareholder-letter manifest into an executable CSV."
+    )
+    parser.add_argument("--input-path", type=Path, default=INPUT_MANIFEST)
+    parser.add_argument("--clean-output-path", type=Path, default=CLEAN_OUTPUT)
+    parser.add_argument("--rejected-output-path", type=Path, default=REJECTED_OUTPUT)
+    return parser.parse_args()
 
 
 def _is_valid_http_url(url: str) -> bool:
@@ -43,9 +69,10 @@ def _normalize_row(row: dict) -> dict:
     normalized["company_id"] = normalized.get("company_id", "").lower().strip()
     normalized["company_name"] = normalized.get("company_name", "").strip()
     normalized["document_type"] = normalized.get("document_type", "").lower().strip()
-    normalized["source_type"] = normalized.get("source_type", "").upper().strip()
+    source_type = normalized.get("source_type", "").strip().lower()
+    normalized["source_type"] = SOURCE_TYPE_ALIASES.get(source_type, source_type)
     normalized["url"] = normalized.get("url", "").strip()
-    normalized["confidence_score"] = normalized.get("confidence_score", "").strip()
+    normalized["confidence_score"] = normalized.get("confidence_score", "").strip() or DEFAULT_CONFIDENCE_SCORE
     normalized["year"] = normalized.get("year", "").strip()
 
     if normalized["document_type"] in {"shareholder letter", "shareholder-letter"}:
@@ -69,9 +96,9 @@ def _row_rejection_reasons(row: dict, current_year_plus_one: int) -> List[str]:
 
     if not year.isdigit():
         return ["invalid_year"]
-    elif row["document_type"] != "shareholder_letter":
+    elif row["document_type"] not in ALLOWED_DOCUMENT_TYPES:
         return ["invalid_document_type"]
-    elif row["source_type"] != "PDF":
+    elif row["source_type"] not in CANONICAL_SOURCE_TYPES:
         return ["invalid_source_type"]
     elif not _is_valid_http_url(row["url"]):
         return ["invalid_url_scheme"]
@@ -124,8 +151,10 @@ def validate_and_clean_manifest(
     valid_df = pd.DataFrame(valid_rows)
     rejected_df = pd.DataFrame(rejected_rows)
 
+    output_columns = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
+
     if valid_df.empty:
-        duplicate_rows = pd.DataFrame(columns=REQUIRED_COLUMNS + ["rejection_reason"])
+        duplicate_rows = pd.DataFrame(columns=output_columns + ["rejection_reason"])
     else:
         duplicate_rows = valid_df[
             valid_df.duplicated(subset=DEDUPLICATION_KEYS, keep="first")
@@ -171,7 +200,12 @@ def validate_and_clean_manifest(
 
 
 def main() -> None:
-    validate_and_clean_manifest()
+    args = parse_args()
+    validate_and_clean_manifest(
+        input_path=args.input_path,
+        clean_output_path=args.clean_output_path,
+        rejected_output_path=args.rejected_output_path,
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+company_id,company_name,document_type,year,source_type,url,language,fiscal_year_end,notes
+berkshire_hathaway,Berkshire Hathaway,chairman_letter,2024,standalone_letter_pdf,https://www.berkshirehathaway.com/letters/2024ltr.pdf,en,12-31,Reviewed direct Berkshire 2024 annual shareholder letter PDF.
+amazon,Amazon,shareholder_letter,2024,standalone_letter_pdf,https://s2.q4cdn.com/299287126/files/doc_financials/2025/ar/2024-Shareholder-Letter-Final.pdf,en,12-31,Reviewed direct Amazon 2024 Letter to Shareholders PDF from investor relations CDN.
+markel,Markel Corporation,shareholder_letter,2024,standalone_letter_pdf,https://content.markel.com/api/public/content/shareholder-letter-2024?v=332d095c,en,12-31,Reviewed direct Markel 2024 shareholder letter PDF.

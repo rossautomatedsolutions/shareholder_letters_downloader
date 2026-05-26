@@ -1,0 +1,11 @@
+company_id,company_name,document_type,year,source_type,url,language,fiscal_year_end,notes
+berkshire_hathaway,Berkshire Hathaway,chairman_letter,2024,PDF,https://www.berkshirehathaway.com/letters/2024ltr.pdf,en,12-31,Ready-to-run example row.
+costco,Costco Wholesale Corporation,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,08-31,Replace with reviewed annual-report or standalone letter URL.
+amazon,Amazon,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.
+apple,Apple Inc.,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,09-30,Replace with reviewed annual-report or standalone letter URL.
+meta,Meta Platforms Inc.,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.
+alphabet,Alphabet Inc.,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.
+danaher,Danaher Corporation,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.
+constellation_software,Constellation Software Inc.,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.
+markel,Markel Corporation,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.
+brookfield,Brookfield Corporation,shareholder_letter,2024,PDF,REPLACE_WITH_REVIEWED_URL,en,12-31,Replace with reviewed annual-report or standalone letter URL.

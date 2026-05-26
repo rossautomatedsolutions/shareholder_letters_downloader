@@ -1,0 +1,8 @@
+pandas
+requests
+beautifulsoup4
+playwright
+PyMuPDF
+PyPDF2
+pdfminer.six
+yfinance
