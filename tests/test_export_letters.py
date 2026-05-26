@@ -2,6 +2,7 @@ import unittest
 import json
 import tempfile
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from export_letters import (
     ManifestValidationError,
@@ -156,6 +157,77 @@ class ExportLettersTests(unittest.TestCase):
             rows = json.loads(json_report.read_text(encoding="utf-8"))
             self.assertEqual(rows[0]["status"], "failed")
             self.assertIn("requires manual source review", rows[0]["error_message"])
+
+    def test_process_rows_stops_started_playwright_instance_for_html(self):
+        row = dict(self.base_row, source_type="html_letter", url="https://example.com/review")
+
+        class DummyPage:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class DummyBrowser:
+            def __init__(self, page):
+                self.page = page
+                self.closed = False
+
+            def new_page(self):
+                return self.page
+
+            def close(self):
+                self.closed = True
+
+        class DummyPlaywright:
+            def __init__(self, browser):
+                self.chromium = SimpleNamespace(launch=lambda: browser)
+                self.stopped = False
+
+            def stop(self):
+                self.stopped = True
+
+        class DummyContextManager:
+            def __init__(self, playwright):
+                self.playwright = playwright
+                self.start_called = False
+
+            def start(self):
+                self.start_called = True
+                return self.playwright
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_root = Path(tmp) / "output"
+            reports_dir = Path(tmp) / "reports"
+            page = DummyPage()
+            browser = DummyBrowser(page)
+            started_playwright = DummyPlaywright(browser)
+            context_manager = DummyContextManager(started_playwright)
+
+            with (
+                patch("playwright.sync_api.sync_playwright", return_value=context_manager),
+                patch("export_letters.fetch_text") as mock_fetch_text,
+                patch("export_letters.render_html_to_pdf") as mock_render_html_to_pdf,
+                patch("export_letters.compute_sha256", return_value="abc123"),
+            ):
+                _, json_report = process_rows(
+                    rows=[row],
+                    output_root=output_root,
+                    reports_dir=reports_dir,
+                    render_overrides={},
+                    retries=0,
+                    timeout_seconds=1,
+                    force_redownload=True,
+                )
+
+            mock_fetch_text.assert_called_once()
+            mock_render_html_to_pdf.assert_called_once()
+            self.assertTrue(context_manager.start_called)
+            self.assertTrue(page.closed)
+            self.assertTrue(browser.closed)
+            self.assertTrue(started_playwright.stopped)
+            rows = json.loads(json_report.read_text(encoding="utf-8"))
+            self.assertEqual(rows[0]["status"], "success")
 
     def test_filter_rows_by_company(self):
         rows = [self.base_row, self.other_company_row]

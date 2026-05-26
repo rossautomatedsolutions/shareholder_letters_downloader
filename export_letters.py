@@ -366,11 +366,12 @@ def process_rows(
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     playwright_context = None
+    playwright = None
     browser = None
     page = None
 
     def ensure_page():
-        nonlocal playwright_context, browser, page
+        nonlocal playwright_context, playwright, browser, page
         if page is not None:
             return page
         from playwright.sync_api import sync_playwright
@@ -509,10 +510,12 @@ def process_rows(
                 }
             )
     finally:
+        if page is not None:
+            page.close()
         if browser is not None:
             browser.close()
-        if playwright_context is not None:
-            playwright_context.stop()
+        if playwright is not None:
+            playwright.stop()
 
     csv_report = reports_dir / f"run_report_{run_id}.csv"
     json_report = reports_dir / f"run_report_{run_id}.json"
