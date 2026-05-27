@@ -54,4 +54,7 @@ def test_runner_uses_strict_mode_and_creates_logs() -> None:
     assert "Import-Csv -LiteralPath $cleanManifestPath" in contents
     assert "--document-type $DocumentType" in contents
     assert "Start-Transcript" in contents
+    assert "Resolve-RepoPath" in contents
+    assert "Set-Location -LiteralPath $repoRoot" in contents
+    assert "Run this script from the repo root" not in contents
     assert "throw " in contents
